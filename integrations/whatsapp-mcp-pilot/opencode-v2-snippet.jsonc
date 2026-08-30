@@ -1,0 +1,20 @@
+{
+  // OPTIONAL PILOT ONLY. Merge manually only after whatsapp-mcp is installed and paired.
+  // Keep disabled until prerequisites are ready.
+  "mcp": {
+    "servers": {
+      "whatsapp_unit_elite": {
+        "type": "local",
+        "command": [
+          "{{ABSOLUTE_PATH_TO_UV}}",
+          "--directory",
+          "{{ABSOLUTE_PATH_TO_WHATSAPP_MCP}}/whatsapp-mcp-server",
+          "run",
+          "main.py"
+        ],
+        "cwd": "{{ABSOLUTE_PATH_TO_WHATSAPP_MCP}}",
+        "disabled": true
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "_label": "D3-03 context preservation multi-turn: echo token must survive fallback",
+  "_expect": "fallback returns the exact token; messages preserved across attempts",
+  "messages": [
+    { "role": "user", "content": "Remember this token: CLOUD-20128. Now reply with exactly that token and nothing else." },
+    { "role": "assistant", "content": "Understood." },
+    { "role": "user", "content": "Repeat the token you remember." }
+  ],
+  "temperature": 0,
+  "max_tokens": 64
+}

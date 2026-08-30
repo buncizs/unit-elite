@@ -1,0 +1,59 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+ "enabled_providers": [
+    "unit-elite-router"
+  ],
+
+"model": "unit-elite-router/ag/gpt-oss-120b-medium",
+"small_model": "unit-elite-router/ag/gpt-oss-120b-medium",
+  "provider": {
+    "unit-elite-router": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Unit Elite 9Router",
+      "options": {
+        "baseURL": "http://127.0.0.1:20128/v1",
+        "apiKey": "{file:~/.unit-elite-secrets/9router.key}"
+      },
+      "models": {
+        "ag/gpt-oss-120b-medium": {
+    "name": "Unit Elite Maintenance - GPT OSS 120B"
+  }
+      }
+    }
+  },
+
+  "default_agent": "ketua-tim",
+  "subagent_depth": 1,
+  "share": "disabled",
+
+  "permission": {
+    "external_directory": "ask",
+    "bash": "ask",
+    "edit": "ask",
+    "task_create": "deny",
+    "task_status": "deny",
+    "task_close": "deny",
+    "task_cancel": "deny",
+    "qc_record": "deny",
+    "generate_docx": "deny",
+    "generate_pptx": "deny",
+    "generate_xlsx": "deny",
+    "generate_pdf": "deny",
+    "artifact_validate": "deny",
+    "artifact_diagnostics": "deny",
+    "task_add_input": "deny",
+    "task_repair_partial_close": "deny",
+    "contact_lookup": "deny",
+    "communication_prepare": "deny",
+    "communication_status": "deny",
+    "communication_approve": "deny",
+    "communication_dispatch_guard": "deny",
+    "communication_record": "deny",
+    "communication_cancel": "deny",
+    "internal_contact_lookup": "deny",
+    "whatsapp_bridge_diagnostics": "deny",
+    "whatsapp_bridge_verify": "deny",
+    "whatsapp_bridge_dispatch": "deny",
+    "communication_diagnostics": "deny"
+  }
+}

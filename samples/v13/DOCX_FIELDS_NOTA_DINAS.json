@@ -1,0 +1,19 @@
+{
+  "YTH": "Kepala Dinas Pendidikan Provinsi Jawa Timur",
+  "DARI": "Kepala Bidang ...",
+  "TANGGAL": "27 Agustus 2026",
+  "KODE_KLASIFIKASI": "400.3",
+  "NOMOR_AGENDA": "<<MENUNGGU REGISTER>>",
+  "KODE_KOMPONEN_PD": "<<VERIFIKASI KODE KOMPONEN>>",
+  "TAHUN": "2026",
+  "SIFAT": "Biasa",
+  "LAMPIRAN": "1 (satu) berkas",
+  "HAL": "Contoh Nota Dinas v1.3",
+  "ISI_NASKAH": "Isi naskah hasil drafting terverifikasi.",
+  "JABATAN_PENANDATANGAN": "KEPALA BIDANG ...",
+  "TANDA_TANGAN_TTE": "${ttd_pengirim}",
+  "NAMA_PENANDATANGAN": "<<NAMA TERVERIFIKASI>>",
+  "PANGKAT_GOLONGAN": "<<PANGKAT/GOLONGAN TERVERIFIKASI>>",
+  "NIP": "<<NIP TERVERIFIKASI>>",
+  "FAX_DINAS": "<<VERIFIKASI FAKSIMILE>>"
+}

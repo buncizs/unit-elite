@@ -1,0 +1,1128 @@
+'use strict';
+/**
+ * acceptance-rg.cjs
+ * ============================================================================
+ * UNIT ELITE RUNTIME GATEWAY — Self-test Acceptance Harness RG-01..RG-28
+ * TECH-0001-D7-R3
+ * ============================================================================
+ *
+ * Uses a LOCAL STUB HTTP server to emulate 9Router. NO live providers,
+ * NO API key required. All 28 tests are fully deterministic.
+ *
+ * Run: node acceptance-rg.cjs
+ * Exit: 0 = all PASS, 1 = some FAIL
+ *
+ * Test port for runtime gateway: 20139 (avoids conflict with production 20129)
+ * Stub 9Router: random ephemeral port (server.listen(0, '127.0.0.1'))
+ * ============================================================================
+ */
+
+const http = require('node:http');
+const net = require('node:net');
+const assert = require('node:assert/strict');
+const { start: startGateway, isGeminiQuarantined, normalizeConversationPayload, ROUTING_POLICY } =
+  require('./runtime-gateway.cjs');
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const RUNTIME_TEST_PORT = 20139;
+const RUNTIME_HOST = '127.0.0.1';
+const LOGICAL_MODEL = 'unit-elite-runtime';
+
+const PRIMARY = ROUTING_POLICY.primary;   // groq/openai/gpt-oss-120b
+const FALLBACK = ROUTING_POLICY.fallback; // ag/claude-sonnet-4-6
+
+// ---------------------------------------------------------------------------
+// Tiny test runner
+// ---------------------------------------------------------------------------
+
+const tests = [];
+function test(name, fn) {
+  tests.push({ name, fn });
+}
+let failures = 0;
+let passes = 0;
+
+async function run() {
+  console.log('');
+  console.log('╔══════════════════════════════════════════════════════════════╗');
+  console.log('║  Unit Elite Runtime Gateway — Acceptance Tests RG-01..RG-28  ║');
+  console.log('║  TECH-0001-D7-R3  (stub mode — no live providers)            ║');
+  console.log('╚══════════════════════════════════════════════════════════════╝');
+  console.log('');
+
+  for (const t of tests) {
+    try {
+      await t.fn();
+      passes++;
+      console.log('PASS  ' + t.name);
+    } catch (err) {
+      failures++;
+      console.log('FAIL  ' + t.name);
+      const stack = err && err.stack ? err.stack.split('\n').slice(0, 5).join('\n      ') : String(err);
+      console.log('      ' + stack);
+    }
+  }
+
+  console.log('');
+  console.log(`RESULT  ${passes}/${tests.length} passed  ${failures} failed`);
+  console.log('');
+
+  if (failures === 0) {
+    console.log('STATUS: PATCH_READY_FOR_ACCEPTANCE');
+  } else {
+    console.log('STATUS: PATCH_BLOCKED — ' + failures + ' test(s) failed');
+  }
+
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: send HTTP request to runtime gateway
+// ---------------------------------------------------------------------------
+
+function httpRequest(options, body) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(options, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        let parsed = null;
+        try { parsed = JSON.parse(raw); } catch { parsed = null; }
+        resolve({ status: res.status || res.statusCode, headers: res.headers, raw, parsed });
+      });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    if (body) req.write(typeof body === 'string' ? body : JSON.stringify(body));
+    req.end();
+  });
+}
+
+function gatewayGet(path) {
+  return httpRequest({
+    hostname: RUNTIME_HOST,
+    port: RUNTIME_TEST_PORT,
+    path,
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+}
+
+function gatewayPost(path, body) {
+  const bodyStr = JSON.stringify(body);
+  return httpRequest({
+    hostname: RUNTIME_HOST,
+    port: RUNTIME_TEST_PORT,
+    path,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(bodyStr),
+      Accept: 'application/json',
+    },
+  }, bodyStr);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: SSE streaming request to runtime gateway
+// ---------------------------------------------------------------------------
+
+function gatewayStream(path, body) {
+  return new Promise((resolve, reject) => {
+    const bodyStr = JSON.stringify(body);
+    const req = http.request({
+      hostname: RUNTIME_HOST,
+      port: RUNTIME_TEST_PORT,
+      path,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(bodyStr),
+        Accept: 'text/event-stream',
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        resolve({
+          status: res.statusCode,
+          headers: res.headers,
+          raw: Buffer.concat(chunks).toString('utf8'),
+        });
+      });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.write(bodyStr);
+    req.end();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Stub 9Router factory
+// ---------------------------------------------------------------------------
+
+/**
+ * scenarios: array of { model, status, body, delayMs?, stream? }
+ * If stream=true, sends SSE data instead of JSON.
+ */
+function createStub(scenarios) {
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    if (String(req.url).endsWith('/models')) {
+      const data = [PRIMARY, FALLBACK].map((id) => ({
+        id, object: 'model', owned_by: 'stub',
+      }));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ object: 'list', data }));
+      return;
+    }
+
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      let body = null;
+      try { body = JSON.parse(raw); } catch { body = null; }
+      const model = body && typeof body.model === 'string' ? body.model : null;
+      requests.push({ model, body, url: req.url, headers: req.headers });
+
+      const scenario = scenarios.find((s) => s.model === model);
+      if (!scenario) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: { message: 'no stub scenario for model: ' + model } }));
+        return;
+      }
+      scenario.calls = (scenario.calls || 0) + 1;
+
+      const respond = () => {
+        try {
+          if (scenario.stream) {
+            // Emit SSE stream.
+            res.writeHead(200, {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+            });
+            const chunks = scenario.sseChunks || [
+              { choices: [{ delta: { role: 'assistant', content: 'Hello' }, index: 0 }] },
+              { choices: [{ delta: { content: ' World' }, index: 0, finish_reason: 'stop' }] },
+            ];
+            for (const chunk of chunks) {
+              res.write('data: ' + JSON.stringify(chunk) + '\n\n');
+            }
+            res.write('data: [DONE]\n\n');
+            res.end();
+          } else {
+            res.writeHead(scenario.status, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(scenario.body));
+          }
+        } catch { /* client aborted */ }
+      };
+
+      if (scenario.delayMs) {
+        setTimeout(respond, scenario.delayMs);
+      } else {
+        respond();
+      }
+    });
+  });
+
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      resolve({
+        server,
+        port,
+        requests,
+        close: () => new Promise((r) => server.close(r)),
+      });
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Standard test payloads
+// ---------------------------------------------------------------------------
+
+const SAMPLE_PAYLOAD = {
+  messages: [
+    { role: 'system', content: 'You are a test assistant.' },
+    { role: 'user', content: 'Say PONG.' },
+  ],
+  temperature: 0.1,
+  max_tokens: 32,
+};
+
+function okCompletion(content) {
+  return {
+    id: 'stub-' + Math.random().toString(36).slice(2),
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: 'stub',
+    choices: [
+      { index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' },
+    ],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  };
+}
+
+function toolCallCompletion() {
+  return {
+    id: 'stub-tc',
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: 'stub',
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'call_x1', type: 'function', function: { name: 'test_tool', arguments: '{}' } },
+          ],
+        },
+        finish_reason: 'tool_calls',
+      },
+    ],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Runtime gateway startup (shared across all tests)
+// We start the gateway once at port 20139, pointing it at a per-test stub.
+// For tests that need a specific stub, we temporarily redirect the upstream URL.
+// ---------------------------------------------------------------------------
+
+// We use a shared "mux stub" — a single stub server that routes based on
+// a mutable scenario registry. This way we start the gateway only once.
+
+let muxRequests = [];
+let muxScenarios = [];
+let muxStubPort = null;
+let muxStubServer = null;
+let gatewayServer = null;
+let logBuffer = [];
+
+function setScenarios(scenarios) {
+  muxScenarios = scenarios.map((s) => Object.assign({ calls: 0 }, s));
+  muxRequests = [];
+}
+
+function getRequests() {
+  return muxRequests.slice();
+}
+
+async function startMuxStub() {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      if (String(req.url).endsWith('/models')) {
+        const data = [PRIMARY, FALLBACK].map((id) => ({
+          id, object: 'model', owned_by: 'stub',
+        }));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ object: 'list', data }));
+        return;
+      }
+
+      let raw = '';
+      req.on('data', (c) => (raw += c));
+      req.on('end', () => {
+        let body = null;
+        try { body = JSON.parse(raw); } catch { body = null; }
+        const model = body && typeof body.model === 'string' ? body.model : null;
+        muxRequests.push({ model, body, url: req.url, headers: req.headers });
+
+        const scenario = muxScenarios.find((s) => s.model === model);
+        if (!scenario) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: { message: 'no mux scenario for model: ' + model } }));
+          return;
+        }
+        scenario.calls = (scenario.calls || 0) + 1;
+
+        const respond = () => {
+          try {
+            if (scenario.stream) {
+              res.writeHead(200, {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+              });
+              const chunks = scenario.sseChunks || [
+                { choices: [{ delta: { role: 'assistant', content: 'Hello' }, index: 0 }] },
+                { choices: [{ delta: { content: ' World' }, index: 0, finish_reason: 'stop' }] },
+              ];
+              for (const chunk of chunks) {
+                res.write('data: ' + JSON.stringify(chunk) + '\n\n');
+              }
+              res.write('data: [DONE]\n\n');
+              res.end();
+            } else {
+              res.writeHead(scenario.status, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(scenario.body));
+            }
+          } catch { /* client aborted */ }
+        };
+
+        if (scenario.delayMs) {
+          setTimeout(respond, scenario.delayMs);
+        } else {
+          respond();
+        }
+      });
+    });
+
+    server.listen(0, '127.0.0.1', () => {
+      muxStubPort = server.address().port;
+      muxStubServer = server;
+      resolve();
+    });
+  });
+}
+
+// We patch the gateway's UPSTREAM_ROUTER at module level via env var before requiring.
+// Since gateway is already required, we need to override its upstream lookup.
+// We do this by patching the environment so buildController picks up the stub URL.
+async function startTestGateway() {
+  // Set UPSTREAM env to point gateway at our mux stub.
+  process.env.UNIT_ELITE_UPSTREAM_URL = `http://127.0.0.1:${muxStubPort}/v1`;
+  // Set a dummy API key so FallbackController doesn't log a "no key" warning.
+  process.env.NINEROUTER_KEY = 'stub-test-key-not-real';
+
+  gatewayServer = await startGateway({
+    port: RUNTIME_TEST_PORT,
+    host: RUNTIME_HOST,
+  });
+}
+
+// Wait for gateway to accept connections.
+async function waitForGateway(maxWaitMs = 3000) {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await gatewayGet('/health');
+      if (res.status === 200) return;
+    } catch { /* not ready yet */ }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error('Gateway did not become ready within ' + maxWaitMs + 'ms');
+}
+
+// ---------------------------------------------------------------------------
+// SETUP: start mux stub + gateway once before all tests
+// ---------------------------------------------------------------------------
+
+async function setup() {
+  // Check port 20139 is free.
+  const portFree = await new Promise((resolve) => {
+    const t = net.createServer();
+    t.once('error', () => resolve(false));
+    t.once('listening', () => t.close(() => resolve(true)));
+    t.listen(RUNTIME_TEST_PORT, RUNTIME_HOST);
+  });
+  if (!portFree) {
+    console.error(`FATAL: Test port ${RUNTIME_TEST_PORT} is already in use. Cannot run acceptance tests.`);
+    process.exit(2);
+  }
+
+  await startMuxStub();
+  await startTestGateway();
+  await waitForGateway();
+}
+
+async function teardown() {
+  if (gatewayServer) {
+    await new Promise((r) => gatewayServer.close(r));
+  }
+  if (muxStubServer) {
+    await new Promise((r) => muxStubServer.close(r));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// RG-01: Runtime process starts and binds to 127.0.0.1:PORT
+// ---------------------------------------------------------------------------
+
+test('RG-01: Runtime process starts and binds to 127.0.0.1:PORT', async () => {
+  // Gateway is already started in setup(). Verify it responds.
+  const res = await gatewayGet('/health');
+  assert.equal(res.status, 200, 'HTTP 200 from gateway');
+  assert.ok(res.parsed, 'parsed JSON');
+  assert.equal(res.parsed.status, 'ready', 'status=ready');
+});
+
+// ---------------------------------------------------------------------------
+// RG-02: GET /health returns status:ready + all required fields
+// ---------------------------------------------------------------------------
+
+test('RG-02: GET /health returns status:ready + all required fields', async () => {
+  setScenarios([]); // health check uses /models endpoint
+  const res = await gatewayGet('/health');
+  assert.equal(res.status, 200);
+  const h = res.parsed;
+  assert.equal(h.status, 'ready');
+  assert.equal(h.runtime, 'unit-elite-runtime');
+  assert.ok('router' in h, 'router field present');
+  assert.equal(h.routing_policy, 'loaded');
+  assert.equal(h.fallback_controller, 'ready');
+  assert.equal(h.gemini_quarantine, true);
+});
+
+// ---------------------------------------------------------------------------
+// RG-03: GET /v1/models returns unit-elite-runtime only
+// ---------------------------------------------------------------------------
+
+test('RG-03: GET /v1/models returns unit-elite-runtime only — no ag/gemini/groq exposed', async () => {
+  const res = await gatewayGet('/v1/models');
+  assert.equal(res.status, 200);
+  const body = res.parsed;
+  assert.equal(body.object, 'list');
+  assert.ok(Array.isArray(body.data));
+  assert.equal(body.data.length, 1, 'exactly one model exposed');
+  assert.equal(body.data[0].id, 'unit-elite-runtime');
+  assert.equal(body.data[0].owned_by, 'unit-elite');
+
+  // Must NOT expose internal provider models.
+  const ids = body.data.map((m) => m.id);
+  for (const id of ids) {
+    assert.ok(!id.startsWith('ag/'), 'must not expose ag/* models: ' + id);
+    assert.ok(!id.startsWith('gemini/'), 'must not expose gemini/* models: ' + id);
+    assert.ok(!id.startsWith('groq/'), 'must not expose groq/* models: ' + id);
+    assert.ok(!id.startsWith('gh/'), 'must not expose gh/* models: ' + id);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// RG-04: POST /v1/chat/completions non-stream → success response
+// ---------------------------------------------------------------------------
+
+test('RG-04: POST /v1/chat/completions non-stream → success response', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('PONG') },
+  ]);
+  const res = await gatewayPost('/v1/chat/completions', SAMPLE_PAYLOAD);
+  assert.equal(res.status, 200, 'HTTP 200');
+  const body = res.parsed;
+  assert.ok(body, 'has body');
+  assert.ok(Array.isArray(body.choices), 'has choices');
+  assert.equal(body.choices[0].message.content, 'PONG');
+  assert.equal(body.choices[0].finish_reason, 'stop');
+});
+
+// ---------------------------------------------------------------------------
+// RG-05: POST /v1/chat/completions stream:true → SSE response
+// ---------------------------------------------------------------------------
+
+test('RG-05: POST /v1/chat/completions stream:true → SSE response', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 200, stream: true, sseChunks: [
+      { id: 's1', choices: [{ delta: { role: 'assistant', content: 'Hello' }, index: 0 }] },
+      { id: 's2', choices: [{ delta: { content: ' World' }, index: 0, finish_reason: 'stop' }] },
+    ]},
+  ]);
+
+  const res = await gatewayStream('/v1/chat/completions', Object.assign({}, SAMPLE_PAYLOAD, { stream: true }));
+  assert.equal(res.status, 200, 'HTTP 200');
+  assert.ok(
+    res.headers['content-type'] && res.headers['content-type'].includes('text/event-stream'),
+    'Content-Type: text/event-stream'
+  );
+  assert.ok(res.raw.includes('data:'), 'contains SSE data lines');
+  assert.ok(res.raw.includes('[DONE]'), 'contains [DONE] sentinel');
+});
+
+// ---------------------------------------------------------------------------
+// RG-06: POST /v1/chat/completions with response_format → JSON preserved to provider
+// ---------------------------------------------------------------------------
+
+test('RG-06: POST /v1/chat/completions with response_format → preserved to provider', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('{"result":"ok"}') },
+  ]);
+  const payload = Object.assign({}, SAMPLE_PAYLOAD, {
+    response_format: { type: 'json_object' },
+  });
+  const res = await gatewayPost('/v1/chat/completions', payload);
+  assert.equal(res.status, 200);
+
+  // Verify the stub received the response_format field.
+  const req = getRequests().find((r) => r.model === PRIMARY);
+  assert.ok(req, 'stub received request for primary model');
+  assert.deepEqual(req.body.response_format, { type: 'json_object' }, 'response_format preserved');
+});
+
+// ---------------------------------------------------------------------------
+// RG-07: POST /v1/chat/completions with tools → tool_calls returned
+// ---------------------------------------------------------------------------
+
+test('RG-07: POST /v1/chat/completions with tools → tool_calls returned', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 200, body: toolCallCompletion() },
+  ]);
+  const payload = Object.assign({}, SAMPLE_PAYLOAD, {
+    tools: [
+      { type: 'function', function: { name: 'test_tool', description: 'test', parameters: { type: 'object', properties: {} } } },
+    ],
+    tool_choice: 'auto',
+  });
+  const res = await gatewayPost('/v1/chat/completions', payload);
+  assert.equal(res.status, 200);
+  const msg = res.parsed.choices[0].message;
+  assert.ok(Array.isArray(msg.tool_calls), 'tool_calls present');
+  assert.equal(msg.tool_calls[0].function.name, 'test_tool');
+  assert.equal(res.parsed.choices[0].finish_reason, 'tool_calls');
+});
+
+// ---------------------------------------------------------------------------
+// RG-08: POST with tool result in messages → continuation processed normally
+// ---------------------------------------------------------------------------
+
+test('RG-08: POST with tool result in messages → stateless continuation', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('Tool result processed.') },
+  ]);
+  // Simulate a tool-result continuation (OpenCode sends full history).
+  const payload = {
+    messages: [
+      { role: 'user', content: 'What is the weather?' },
+      { role: 'assistant', content: null, tool_calls: [
+        { id: 'call_1', type: 'function', function: { name: 'get_weather', arguments: '{"location":"Jakarta"}' } },
+      ]},
+      { role: 'tool', content: '{"temperature": 30, "unit": "celsius"}', tool_call_id: 'call_1' },
+    ],
+    max_tokens: 64,
+  };
+  const res = await gatewayPost('/v1/chat/completions', payload);
+  assert.equal(res.status, 200);
+  assert.ok(res.parsed.choices[0].message.content.includes('Tool result'));
+
+  // Verify full message history was forwarded to provider.
+  const req = getRequests().find((r) => r.model === PRIMARY);
+  assert.ok(req, 'stub received request');
+  assert.equal(req.body.messages.length, 3, 'all 3 messages forwarded');
+  assert.equal(req.body.messages[2].role, 'tool');
+});
+
+// ---------------------------------------------------------------------------
+// RG-09: Multi-turn messages preserved across retry (fallback)
+// ---------------------------------------------------------------------------
+
+test('RG-09: Multi-turn messages preserved across fallback retry', async () => {
+  const history = [
+    { role: 'user', content: 'Remember token ALPHA-9999.' },
+    { role: 'assistant', content: 'Noted.' },
+    { role: 'user', content: 'What was the token?' },
+  ];
+  setScenarios([
+    { model: PRIMARY, status: 503, body: { error: { message: 'upstream down' } } },
+    { model: FALLBACK, status: 200, body: okCompletion('ALPHA-9999') },
+  ]);
+  const payload = { messages: history, max_tokens: 64 };
+  const res = await gatewayPost('/v1/chat/completions', payload);
+  assert.equal(res.status, 200);
+  assert.ok(res.parsed.choices[0].message.content.includes('ALPHA-9999'));
+
+  // Verify fallback received full history.
+  const reqs = getRequests();
+  const fallbackReq = reqs.find((r) => r.model === FALLBACK);
+  assert.ok(fallbackReq, 'fallback model was called');
+  assert.deepEqual(fallbackReq.body.messages, history, 'full history preserved to fallback');
+});
+
+// ---------------------------------------------------------------------------
+// RG-10: General route selects non-Gemini provider
+// ---------------------------------------------------------------------------
+
+test('RG-10: General route selects non-Gemini provider', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('ok') },
+  ]);
+  const res = await gatewayPost('/v1/chat/completions', SAMPLE_PAYLOAD);
+  assert.equal(res.status, 200);
+
+  // The provider that received the request must NOT be Gemini.
+  const reqs = getRequests();
+  for (const r of reqs) {
+    assert.ok(!isGeminiQuarantined(r.model), 'no Gemini model used: ' + r.model);
+  }
+
+  // Primary must be non-Gemini.
+  assert.ok(!isGeminiQuarantined(PRIMARY), 'PRIMARY is not Gemini: ' + PRIMARY);
+});
+
+// ---------------------------------------------------------------------------
+// RG-11: Coding route (task_type:coding hint in extra field) — non-Gemini
+// ---------------------------------------------------------------------------
+
+test('RG-11: Coding route hint (task_type:coding) → selects non-Gemini provider', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('code result') },
+  ]);
+  // OpenCode may pass extra metadata; gateway must still route to non-Gemini.
+  const payload = Object.assign({}, SAMPLE_PAYLOAD, { x_task_type: 'coding' });
+  const res = await gatewayPost('/v1/chat/completions', payload);
+  assert.equal(res.status, 200);
+
+  const reqs = getRequests();
+  for (const r of reqs) {
+    assert.ok(!isGeminiQuarantined(r.model), 'no Gemini model used for coding task: ' + r.model);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// RG-12: Primary failure (5xx) → transparent fallback, OpenCode sees success
+// ---------------------------------------------------------------------------
+
+test('RG-12: Primary 5xx failure → transparent fallback → OpenCode sees success', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 502, body: { error: { message: 'Bad gateway' } } },
+    { model: FALLBACK, status: 200, body: okCompletion('fallback success') },
+  ]);
+  const res = await gatewayPost('/v1/chat/completions', SAMPLE_PAYLOAD);
+  assert.equal(res.status, 200, 'OpenCode sees 200 despite primary failure');
+  assert.ok(res.parsed.choices[0].message.content.includes('fallback success'));
+
+  const reqs = getRequests();
+  const primaryReq = reqs.find((r) => r.model === PRIMARY);
+  const fallbackReq = reqs.find((r) => r.model === FALLBACK);
+  assert.ok(primaryReq, 'primary was attempted');
+  assert.ok(fallbackReq, 'fallback was attempted');
+});
+
+// ---------------------------------------------------------------------------
+// RG-13: Gemini quarantine — ZERO gemini/* attempts even as fallback
+// ---------------------------------------------------------------------------
+
+test('RG-13: Gemini quarantine — ZERO gemini/* attempts in any route slot', async () => {
+  // Verify at the module level that no Gemini model is in routing policy.
+  assert.ok(!isGeminiQuarantined(ROUTING_POLICY.primary),
+    'PRIMARY is not Gemini (it is safe): ' + ROUTING_POLICY.primary);
+  assert.ok(!isGeminiQuarantined(ROUTING_POLICY.fallback),
+    'FALLBACK is not Gemini (it is safe): ' + ROUTING_POLICY.fallback);
+
+  // Also verify quarantine detection works for known Gemini patterns.
+  assert.ok(isGeminiQuarantined('gemini/gemini-3.5-flash-lite'), 'gemini/ prefix quarantined');
+  assert.ok(isGeminiQuarantined('gemini/gemini-pro'), 'gemini/gemini-pro quarantined');
+  assert.ok(isGeminiQuarantined('ag/gemini-flash'), 'ag/gemini-* quarantined');
+  assert.ok(!isGeminiQuarantined('ag/claude-sonnet-4-6'), 'ag/claude-sonnet-4-6 NOT quarantined');
+  assert.ok(!isGeminiQuarantined('groq/openai/gpt-oss-120b'), 'groq primary NOT quarantined');
+
+  // Trigger a request and verify no gemini call was made to stub.
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('ok') },
+  ]);
+  await gatewayPost('/v1/chat/completions', SAMPLE_PAYLOAD);
+  const reqs = getRequests();
+  for (const r of reqs) {
+    assert.ok(!isGeminiQuarantined(r.model), 'QUARANTINE VIOLATION: Gemini model used: ' + r.model);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// RG-14: Provider error NOT leaked raw to OpenCode (normalized error)
+// ---------------------------------------------------------------------------
+
+test('RG-14: Raw provider error NOT forwarded — OpenCode receives normalized error', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 429, body: { error: { message: 'SECRET_INTERNAL_QUOTA_EXCEEDED', type: 'rate_limit', internal_trace_id: 'trace-xyz-123' } } },
+    { model: FALLBACK, status: 429, body: { error: { message: 'ANOTHER_SECRET_QUOTA', type: 'rate_limit' } } },
+  ]);
+  const res = await gatewayPost('/v1/chat/completions', SAMPLE_PAYLOAD);
+  // Should be error (both 429 fail after 2 attempts).
+  assert.ok(res.status >= 400, 'error status returned: ' + res.status);
+  // Must NOT contain raw provider internals.
+  assert.ok(!res.raw.includes('SECRET_INTERNAL_QUOTA_EXCEEDED'), 'raw provider message not leaked');
+  assert.ok(!res.raw.includes('ANOTHER_SECRET_QUOTA'), 'raw provider message not leaked');
+  assert.ok(!res.raw.includes('internal_trace_id'), 'provider trace id not leaked');
+  // Should have normalized error structure.
+  assert.ok(res.parsed && res.parsed.error, 'normalized error object present');
+  assert.ok(typeof res.parsed.error.message === 'string', 'error.message is string');
+});
+
+// ---------------------------------------------------------------------------
+// RG-15: 9Router stub remains healthy after all tests
+// ---------------------------------------------------------------------------
+
+test('RG-15: 9Router stub remains healthy after tests', async () => {
+  // The mux stub is still running — verify it responds to /models.
+  const res = await new Promise((resolve, reject) => {
+    http.get(`http://127.0.0.1:${muxStubPort}/v1/models`, (r) => {
+      const chunks = [];
+      r.on('data', (c) => chunks.push(c));
+      r.on('end', () => {
+        resolve({
+          status: r.statusCode,
+          body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+        });
+      });
+    }).on('error', reject);
+  });
+  assert.equal(res.status, 200, 'stub /models returns 200');
+  assert.ok(Array.isArray(res.body.data), 'stub /models has data array');
+});
+
+// ---------------------------------------------------------------------------
+// RG-16: Runtime /health remains ready after all tests
+// ---------------------------------------------------------------------------
+
+test('RG-16: Runtime /health remains ready after all tests', async () => {
+  const res = await gatewayGet('/health');
+  assert.equal(res.status, 200);
+  assert.equal(res.parsed.status, 'ready');
+  assert.equal(res.parsed.runtime, 'unit-elite-runtime');
+  assert.equal(res.parsed.gemini_quarantine, true);
+});
+
+// ---------------------------------------------------------------------------
+// RG-17: Secret non-exposure — no API key in logs
+// ---------------------------------------------------------------------------
+
+test('RG-17: Secret non-exposure — API key not present in request/response paths', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('ok') },
+  ]);
+  await gatewayPost('/v1/chat/completions', SAMPLE_PAYLOAD);
+
+  // The stub captures request headers; the Authorization header must not be
+  // forwarded from OpenCode → gateway (OpenCode sends no auth to gateway),
+  // but the gateway does set auth toward 9Router (stub captures that).
+  // Verify the Authorization header value is NOT "the literal key in plaintext"
+  // in any response the gateway sends back to OpenCode.
+  const res = await gatewayPost('/v1/chat/completions', SAMPLE_PAYLOAD);
+  // Response to OpenCode must not contain any Authorization header.
+  assert.ok(!res.headers['authorization'], 'gateway response has no Authorization header');
+
+  // Also verify: if the stub captures auth from gateway→9Router, the key
+  // is the stub key we set (not a real secret). We just verify it's not
+  // present in any OpenCode-visible response body.
+  const testKey = 'stub-test-key-not-real';
+  assert.ok(!res.raw.includes(testKey), 'API key value not in response body');
+});
+
+// ---------------------------------------------------------------------------
+// RG-18: Reasoning fields stripped from response (sanitizeCompletion)
+// ---------------------------------------------------------------------------
+
+test('RG-18: Reasoning fields stripped from provider response', async () => {
+  // Provider returns reasoning/thinking fields — these must be stripped.
+  const rawCompletion = {
+    id: 'r18',
+    object: 'chat.completion',
+    created: 0,
+    model: 'stub',
+    choices: [{
+      index: 0,
+      message: {
+        role: 'assistant',
+        content: 'Final answer.',
+        reasoning: 'step 1: think... step 2: conclude',
+        thinking: 'internal monologue',
+        reasoning_content: 'chain of thought here',
+      },
+      finish_reason: 'stop',
+    }],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    reasoning: 'top-level reasoning too',
+  };
+  setScenarios([
+    { model: PRIMARY, status: 200, body: rawCompletion },
+  ]);
+  const res = await gatewayPost('/v1/chat/completions', SAMPLE_PAYLOAD);
+  assert.equal(res.status, 200);
+  const body = res.parsed;
+
+  // Top-level reasoning must be stripped.
+  assert.ok(!('reasoning' in body), 'top-level reasoning stripped');
+
+  // Message-level reasoning fields must be stripped.
+  const msg = body.choices[0].message;
+  assert.ok(!('reasoning' in msg), 'message.reasoning stripped');
+  assert.ok(!('thinking' in msg), 'message.thinking stripped');
+  assert.ok(!('reasoning_content' in msg), 'message.reasoning_content stripped');
+
+  // Content must be preserved.
+  assert.equal(msg.content, 'Final answer.', 'content preserved after stripping');
+});
+
+// ---------------------------------------------------------------------------
+// RG-19: Runtime restart (stop+start) preserves stateless behavior
+// ---------------------------------------------------------------------------
+
+test('RG-19: Runtime stateless — consecutive requests independent', async () => {
+  // Gateway holds no per-request state. Two independent calls should both work.
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('call-1') },
+  ]);
+  const res1 = await gatewayPost('/v1/chat/completions', Object.assign({}, SAMPLE_PAYLOAD, {
+    messages: [{ role: 'user', content: 'First call.' }],
+  }));
+  assert.equal(res1.status, 200);
+  assert.ok(res1.parsed.choices[0].message.content.includes('call-1'));
+
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('call-2') },
+  ]);
+  const res2 = await gatewayPost('/v1/chat/completions', Object.assign({}, SAMPLE_PAYLOAD, {
+    messages: [{ role: 'user', content: 'Second call.' }],
+  }));
+  assert.equal(res2.status, 200);
+  assert.ok(res2.parsed.choices[0].message.content.includes('call-2'));
+
+  // Verify isolation: response 2 does not contain response 1's content.
+  assert.ok(!res2.raw.includes('call-1'), 'response 2 isolated from response 1');
+});
+
+// ---------------------------------------------------------------------------
+// RG-20: 9Router port 20128 not contacted directly — stub isolation verified
+// ---------------------------------------------------------------------------
+
+test('RG-20: 9Router port 20128 not contacted directly by OpenCode path (stub isolation)', async () => {
+  // The gateway in test mode is pointed at our mux stub (port != 20128).
+  // This test verifies that the upstream URL in the gateway does NOT include
+  // port 20128, confirming our stub injection worked correctly.
+  // (If it were 20128, our stub would not capture requests.)
+
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('isolated-ok') },
+  ]);
+
+  const preCount = getRequests().length;
+  const res = await gatewayPost('/v1/chat/completions', SAMPLE_PAYLOAD);
+  assert.equal(res.status, 200);
+
+  // Verify stub captured the request (not the live 20128 router).
+  const postReqs = getRequests();
+  assert.ok(postReqs.length > preCount, 'stub captured new request (not 20128)');
+  assert.ok(res.parsed.choices[0].message.content.includes('isolated-ok'), 'response from stub, not live router');
+
+  // Also verify: the stub port is NOT 20128.
+  assert.notEqual(muxStubPort, 20128, 'stub is on ephemeral port, not 20128');
+
+  // And verify the env var points away from 20128.
+  const upstreamUrl = process.env.UNIT_ELITE_UPSTREAM_URL || '';
+  assert.ok(!upstreamUrl.includes(':20128'), 'UNIT_ELITE_UPSTREAM_URL does not point to live :20128');
+});
+
+// ---------------------------------------------------------------------------
+// RG-21: Synthetic trailing assistant prefill is removed safely
+// ---------------------------------------------------------------------------
+
+test('RG-21: Synthetic trailing assistant prefill → normalized before provider dispatch', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('prefill-normalized') },
+  ]);
+
+  const payload = {
+    messages: [
+      { role: 'system', content: 'System context.' },
+      { role: 'user', content: 'Continue normally.' },
+      { role: 'assistant', content: '' },
+    ],
+    max_tokens: 32,
+  };
+
+  const res = await gatewayPost('/v1/chat/completions', payload);
+  assert.equal(res.status, 200);
+  assert.equal(res.parsed.choices[0].message.content, 'prefill-normalized');
+
+  const reqs = getRequests();
+  assert.equal(reqs.length, 1, 'exactly one provider attempt');
+  assert.equal(reqs[0].body.messages.length, 2, 'synthetic trailing assistant removed');
+  assert.equal(reqs[0].body.messages[1].role, 'user', 'provider-bound history ends with user');
+});
+
+// ---------------------------------------------------------------------------
+// RG-22: Completed assistant turn without new input does not call provider
+// ---------------------------------------------------------------------------
+
+test('RG-22: Completed assistant turn with no new input → NO_NEW_USER_TURN, zero provider attempts', async () => {
+  setScenarios([]);
+  const payload = {
+    messages: [
+      { role: 'user', content: 'Answer this.' },
+      { role: 'assistant', content: 'Completed answer.' },
+    ],
+  };
+
+  const res = await gatewayPost('/v1/chat/completions', payload);
+  assert.equal(res.status, 409);
+  assert.ok(res.parsed && res.parsed.error, 'controlled error returned');
+  assert.equal(res.parsed.error.code, 'NO_NEW_USER_TURN');
+  assert.equal(getRequests().length, 0, 'provider attempts = 0');
+});
+
+// ---------------------------------------------------------------------------
+// RG-23: Tool call without result waits instead of invoking provider
+// ---------------------------------------------------------------------------
+
+test('RG-23: Assistant tool_call without result → WAITING_FOR_TOOL_RESULT, zero provider attempts', async () => {
+  setScenarios([]);
+  const payload = {
+    messages: [
+      { role: 'user', content: 'Check the weather.' },
+      { role: 'assistant', content: null, tool_calls: [
+        { id: 'call_pending', type: 'function', function: { name: 'get_weather', arguments: '{}' } },
+      ]},
+    ],
+  };
+
+  const res = await gatewayPost('/v1/chat/completions', payload);
+  assert.equal(res.status, 409);
+  assert.ok(res.parsed && res.parsed.error, 'controlled error returned');
+  assert.equal(res.parsed.error.code, 'WAITING_FOR_TOOL_RESULT');
+  assert.equal(getRequests().length, 0, 'provider attempts = 0');
+});
+
+// ---------------------------------------------------------------------------
+// RG-24: Tool call + matching result continues with exact linkage preserved
+// ---------------------------------------------------------------------------
+
+test('RG-24: Tool call + matching result → valid continuation with linkage preserved', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('tool-continuation-pass') },
+  ]);
+  const payload = {
+    messages: [
+      { role: 'user', content: 'Use the tool.' },
+      { role: 'assistant', content: null, tool_calls: [
+        { id: 'call_match', type: 'function', function: { name: 'test_tool', arguments: '{"x":1}' } },
+      ]},
+      { role: 'tool', tool_call_id: 'call_match', content: '{"ok":true}' },
+    ],
+  };
+
+  const res = await gatewayPost('/v1/chat/completions', payload);
+  assert.equal(res.status, 200);
+  const req = getRequests().find((r) => r.model === PRIMARY);
+  assert.ok(req, 'provider received continuation');
+  assert.equal(req.body.messages[1].tool_calls[0].id, 'call_match');
+  assert.equal(req.body.messages[2].tool_call_id, 'call_match');
+  assert.equal(req.body.messages[2].role, 'tool');
+});
+
+// ---------------------------------------------------------------------------
+// RG-25: Explicit Claude-style synthetic assistant prefill is removed
+// ---------------------------------------------------------------------------
+
+test('RG-25: Explicit assistant-prefill marker → normalized, no identical invalid request', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 200, body: okCompletion('claude-shape-normalized') },
+  ]);
+  const payload = {
+    messages: [
+      { role: 'user', content: 'Produce a response.' },
+      { role: 'assistant', content: 'partial synthetic prefix', __synthetic_prefill__: true },
+    ],
+  };
+
+  const res = await gatewayPost('/v1/chat/completions', payload);
+  assert.equal(res.status, 200);
+  const reqs = getRequests();
+  assert.equal(reqs.length, 1, 'one provider request only');
+  assert.deepEqual(reqs[0].body.messages, [{ role: 'user', content: 'Produce a response.' }]);
+  assert.ok(!JSON.stringify(reqs[0].body).includes('__synthetic_prefill__'), 'internal marker not forwarded');
+});
+
+// ---------------------------------------------------------------------------
+// RG-26: Gemini-style trailing model turn is normalized on streaming path
+// ---------------------------------------------------------------------------
+
+test('RG-26: Gemini trailing-model-turn shape → normalized on stream path, Gemini attempts remain zero', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 200, stream: true },
+  ]);
+  const payload = {
+    messages: [
+      { role: 'user', content: 'Stream a response.' },
+      { role: 'assistant', content: null },
+    ],
+    stream: true,
+  };
+
+  const res = await gatewayStream('/v1/chat/completions', payload);
+  assert.equal(res.status, 200);
+  assert.ok(res.raw.includes('[DONE]'), 'stream completed');
+  const reqs = getRequests();
+  assert.equal(reqs.length, 1, 'one non-Gemini provider attempt');
+  assert.equal(reqs[0].body.messages.length, 1);
+  assert.equal(reqs[0].body.messages[0].role, 'user');
+  for (const req of reqs) {
+    assert.ok(!isGeminiQuarantined(req.model), 'Gemini attempts remain zero');
+  }
+});
+
+// ---------------------------------------------------------------------------
+// RG-27: Normalizer is non-mutating and never fabricates conversation content
+// ---------------------------------------------------------------------------
+
+test('RG-27: Normalizer never fabricates user/tool/assistant content and never mutates input', async () => {
+  const payload = {
+    messages: [
+      { role: 'user', content: 'Call a tool.' },
+      { role: 'assistant', content: null, tool_calls: [
+        { id: 'call_nf', type: 'function', function: { name: 'test_tool', arguments: '{}' } },
+      ]},
+      { role: 'tool', tool_call_id: 'call_nf', content: '{"value":42}' },
+      { role: 'assistant', content: '', __synthetic_prefill__: true },
+    ],
+    temperature: 0,
+  };
+  const originalSnapshot = JSON.parse(JSON.stringify(payload));
+  const result = normalizeConversationPayload(payload);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.action, 'NORMALIZED');
+  assert.deepEqual(payload, originalSnapshot, 'input object was not mutated');
+  assert.equal(result.payload.messages.length, 3, 'only synthetic trailing prefill removed');
+  assert.deepEqual(result.payload.messages, originalSnapshot.messages.slice(0, 3), 'all legitimate messages preserved exactly');
+  assert.equal(result.payload.messages.filter((m) => m.role === 'user').length, 1, 'no user message fabricated');
+  assert.equal(result.payload.messages.filter((m) => m.role === 'tool').length, 1, 'no tool result fabricated');
+  assert.equal(result.payload.messages.filter((m) => m.role === 'assistant').length, 1, 'no assistant content fabricated');
+});
+
+// ---------------------------------------------------------------------------
+// RG-28: Deterministic provider 400 is not retried/fallen back identically
+// ---------------------------------------------------------------------------
+
+test('RG-28: Deterministic request-shape provider 400 → zero identical retry and zero fallback', async () => {
+  setScenarios([
+    { model: PRIMARY, status: 400, body: { error: { type: 'invalid_request_error', message: 'assistant prefill unsupported' } } },
+    { model: FALLBACK, status: 200, body: okCompletion('SHOULD_NOT_BE_CALLED') },
+  ]);
+
+  const res = await gatewayPost('/v1/chat/completions', {
+    messages: [{ role: 'user', content: 'Valid user turn.' }],
+  });
+
+  assert.equal(res.status, 400, 'deterministic request-shape error returned as 400');
+  const reqs = getRequests();
+  const primaryReqs = reqs.filter((r) => r.model === PRIMARY);
+  const fallbackReqs = reqs.filter((r) => r.model === FALLBACK);
+  assert.equal(primaryReqs.length, 1, 'same primary payload attempted exactly once');
+  assert.equal(fallbackReqs.length, 0, 'deterministic 400 does not fall back');
+});
+
+// ---------------------------------------------------------------------------
+// Main: setup → tests → teardown
+// ---------------------------------------------------------------------------
+
+(async () => {
+  try {
+    await setup();
+  } catch (err) {
+    console.error('SETUP FAILED: ' + (err && err.message ? err.message : String(err)));
+    process.exit(2);
+  }
+
+  try {
+    await run();
+  } finally {
+    try {
+      await teardown();
+    } catch { /* best effort */ }
+  }
+})();

@@ -1,0 +1,10 @@
+{
+  "_label": "D3-04 structured output: response_format json_object preserved through fallback",
+  "_expect": "response parses as valid JSON with fields ok=true, word=PONG",
+  "messages": [
+    { "role": "user", "content": "Return ONLY valid JSON with exactly this shape and no extra text: {\"ok\": true, \"word\": \"PONG\"}" }
+  ],
+  "temperature": 0,
+  "max_tokens": 128,
+  "response_format": { "type": "json_object" }
+}

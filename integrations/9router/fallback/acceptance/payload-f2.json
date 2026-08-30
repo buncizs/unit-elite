@@ -1,0 +1,6 @@
+{
+  "messages": [
+    { "content": "message missing the role field" }
+  ],
+  "max_tokens": 64
+}

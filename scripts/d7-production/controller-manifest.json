@@ -1,0 +1,35 @@
+{
+  "phase": "TECH-0001-D7-R5",
+  "controller": "Unit Elite production single-button controller",
+  "router": "127.0.0.1:20128",
+  "runtime": "127.0.0.1:20129",
+  "router_app_health": "authenticated GET /v1/models",
+  "runtime_health": "GET /health full readiness",
+  "opencode_discovery": "%LOCALAPPDATA%\\Programs\\@opencode-aidesktop\\OpenCode.exe",
+  "recovery_max_attempts": 3,
+  "forbidden_recovery_actions": [
+    "reinstall",
+    "credential reset",
+    "SQLite deletion",
+    "routing policy modification",
+    "kill all node.exe",
+    "kill all OpenCode.exe"
+  ],
+  "whatsapp_bridge": {
+    "required_for_ready": true,
+    "endpoint": "http://127.0.0.1:8080/api",
+    "health": "GET /api/health",
+    "executable": "D:\\OpenCode\\whatsapp-mcp-main\\whatsapp-bridge\\whatsapp-bridge.exe",
+    "working_directory": "D:\\OpenCode\\whatsapp-mcp-main\\whatsapp-bridge",
+    "session_store_policy": "preserve; never delete/reset automatically",
+    "build_policy": "never rebuild during START/RECOVER",
+    "pairing_policy": "never reset pairing automatically",
+    "human_approval_gate": "still mandatory for external dispatch"
+  },
+  "full_system_ready_requires": [
+    "9Router READY",
+    "Runtime READY",
+    "WhatsApp Bridge READY_OWNED",
+    "OpenCode RUNNING_OWNED"
+  ]
+}

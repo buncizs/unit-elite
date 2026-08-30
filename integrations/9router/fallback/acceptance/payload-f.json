@@ -1,0 +1,4 @@
+{
+  "model": "groq/openai/gpt-oss-120b",
+  "prompt": "this is not an openai chat payload - no messages field"
+}

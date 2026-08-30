@@ -1,0 +1,22 @@
+[
+  {
+    "section": "KONTEKS",
+    "title": "Tujuan Telaah",
+    "bullets": [
+      "Menguji kesesuaian analisis dengan draft regulasi terakhir",
+      "Mengidentifikasi gap normatif dan implementation gap",
+      "Menetapkan isu prioritas untuk keputusan pimpinan"
+    ]
+  },
+  {
+    "section": "TEMUAN",
+    "title": "Matriks Kesesuaian Utama",
+    "table": {
+      "headers": ["Isu", "Status", "Catatan"],
+      "rows": [
+        ["Substansi A", "Sesuai", "Terakomodasi"],
+        ["Substansi B", "Sebagian", "Perlu penyempurnaan"]
+      ]
+    }
+  }
+]

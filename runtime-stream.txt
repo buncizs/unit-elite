@@ -1,0 +1,39 @@
+data: {"id":"chatcmpl-bf18b55d-36be-47b3-a756-eff2890ceb67","object":"chat.completion.chunk","created":1788028903,"model":"openai/gpt-oss-120b","system_fingerprint":"fp_bb691ea66b","choices":[{"index":0,"delta":{"role":"assistant","content":""},"logprobs":null,"finish_reason":null}],"x_groq":{"id":"req_01m17d7r2kebxrercscse9cxhq","seed":400442083}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"chatcmpl-bf18b55d-36be-47b3-a756-eff2890ceb67","object":"chat.completion.chunk","created":1788028903,"model":"openai/gpt-oss-120b","system_fingerprint":"fp_bb691ea66b","choices":[{"index":0,"delta":{"content":"S"},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-bf18b55d-36be-47b3-a756-eff2890ceb67","object":"chat.completion.chunk","created":1788028903,"model":"openai/gpt-oss-120b","system_fingerprint":"fp_bb691ea66b","choices":[{"index":0,"delta":{"content":"SE"},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-bf18b55d-36be-47b3-a756-eff2890ceb67","object":"chat.completion.chunk","created":1788028903,"model":"openai/gpt-oss-120b","system_fingerprint":"fp_bb691ea66b","choices":[{"index":0,"delta":{"content":"_FINAL"},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-bf18b55d-36be-47b3-a756-eff2890ceb67","object":"chat.completion.chunk","created":1788028903,"model":"openai/gpt-oss-120b","system_fingerprint":"fp_bb691ea66b","choices":[{"index":0,"delta":{"content":"_CHECK"},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-bf18b55d-36be-47b3-a756-eff2890ceb67","object":"chat.completion.chunk","created":1788028903,"model":"openai/gpt-oss-120b","system_fingerprint":"fp_bb691ea66b","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}],"x_groq":{"id":"req_01m17d7r2kebxrercscse9cxhq","usage":{"queue_time":0.3762603,"prompt_tokens":77,"prompt_time":0.013671929,"completion_tokens":37,"completion_time":0.077229715,"total_tokens":114,"total_time":0.090901644,"completion_tokens_details":{"reasoning_tokens":24}}},"usage":{"prompt_tokens":2077,"completion_tokens":37,"total_tokens":2114,"reasoning_tokens":24,"completion_tokens_details":{"reasoning_tokens":24}}}
+
+
+
+data: [DONE]
+

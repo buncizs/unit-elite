@@ -1,0 +1,44 @@
+{
+  "version": "1.5",
+  "timezone": "Asia/Jakarta",
+  "task_done_keyword": "TASK SELESAI",
+  "task_cancel_keyword": "BATALKAN TASK",
+  "communication_send_keywords": [
+    "KIRIM PESAN",
+    "KIRIM SEMUA"
+  ],
+  "cleanup_inbox_on_close": true,
+  "archive_working_files": true,
+  "artifact_output_policy": "Final user deliverables must be DOCX, PPTX, XLSX, or PDF when those formats are requested. Markdown is an internal working format only.",
+  "task_paths": {
+    "inbox": "workspace/inbox",
+    "active": "workspace/active",
+    "done": "workspace/task_done",
+    "cancelled": "workspace/task_cancelled"
+  },
+  "task_close_mode": "atomic-rename",
+  "block_close_when_files_busy": true,
+  "office_lockfile_detection": true,
+  "contact_registry": {
+    "school_path": "knowledge/contact-registry/nomor_ks.csv",
+    "internal_path": "knowledge/contact-registry/internal/internal_contacts.csv",
+    "selection_rule": "Kepala Sekolah with usable contact first; if unavailable use first usable management contact within same NPSN/source order. When WhatsApp verification is available, NOT_REGISTERED may trigger fallback within the same NPSN.",
+    "wa_link_format": "https://wa.me/<62-normalized-number>",
+    "whatsapp_account_verification": "UNKNOWN unless verified by an approved external adapter",
+    "quick_lookup_without_task": true,
+    "target_completeness_invariant": "Every source target must appear exactly once in the operational output/report, including no-contact and failed-verification targets."
+  },
+  "communication_gateway": {
+    "default_channel": "WHATSAPP",
+    "human_approval_required": true,
+    "auto_send_after_qc": false,
+    "delivery_package_state_before_approval": "READY_FOR_APPROVAL",
+    "dispatch_guard_required_per_recipient": true,
+    "attachment_must_belong_to_active_task": true,
+    "record_delivery_results": true,
+    "archive_communication_logs": true,
+    "live_backend": "DISABLED_BY_DEFAULT",
+    "pilot_backend": "lharries/whatsapp-mcp",
+    "pilot_mode": "OPTIONAL_EXTERNAL_INTEGRATION"
+  }
+}

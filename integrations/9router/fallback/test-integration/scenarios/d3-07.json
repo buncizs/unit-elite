@@ -1,0 +1,9 @@
+{
+  "_label": "D3-07 double failure: both providers unavailable -> controlled error, max 2 attempts, no infinite retry",
+  "_expect": "ok=false; error_class=MODEL_UNAVAILABLE; eligible_for_fallback=true; attempted_models=[primary-invalid, fallback-invalid]; no 3rd attempt",
+  "messages": [
+    { "role": "user", "content": "Reply with exactly: PONG" }
+  ],
+  "temperature": 0,
+  "max_tokens": 64
+}

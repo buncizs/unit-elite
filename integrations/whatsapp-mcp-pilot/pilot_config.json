@@ -1,0 +1,7 @@
+{
+  "pilot_mode": true,
+  "bridge_url": "http://127.0.0.1:8080/api",
+  "allowed_numbers": [628179841102],
+  "max_dispatch_per_approval": 3,
+  "notes": "Isi allowed_numbers hanya dengan nomor WhatsApp milik tim/penguji dalam format 62... selama pilot. Jangan masukkan kontak sekolah sebelum pilot dinyatakan lulus."
+}

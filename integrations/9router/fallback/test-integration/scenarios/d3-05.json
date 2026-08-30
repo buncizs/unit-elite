@@ -1,0 +1,23 @@
+{
+  "_label": "D3-05 tool calling: tools/tool_choice preserved through fallback, trigger a tool call",
+  "_expect": "response contains tool_calls with function.name=get_test_status, finish_reason=tool_calls",
+  "messages": [
+    { "role": "user", "content": "Call the function get_test_status with no arguments." }
+  ],
+  "temperature": 0,
+  "max_tokens": 128,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_test_status",
+        "description": "Return the current test status of the Unit Elite D3 acceptance run",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto"
+}

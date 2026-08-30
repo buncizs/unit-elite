@@ -1,0 +1,12 @@
+{
+  "sheets": [
+    {
+      "name": "Matriks Kesesuaian",
+      "headers": ["No", "Substansi Analisis", "Pasal Draft", "Status", "Catatan"],
+      "rows": [
+        [1, "Contoh substansi", "Pasal X", "Sesuai Sebagian", "Perlu penguatan mekanisme"]
+      ],
+      "note": "Data contoh. Ganti hanya dengan temuan yang terverifikasi."
+    }
+  ]
+}

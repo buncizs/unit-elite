@@ -1,0 +1,9 @@
+{
+  "_label": "D3-02 provider fallback (reversible controlled): primary forced unavailable -> gemini takes over",
+  "_expect": "ok=true; selected_model=gemini/gemini-3.5-flash-lite; attempted_models=[primary-invalid, fallback]",
+  "messages": [
+    { "role": "user", "content": "Reply with exactly: PONG" }
+  ],
+  "temperature": 0,
+  "max_tokens": 64
+}

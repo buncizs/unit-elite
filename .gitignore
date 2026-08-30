@@ -1,0 +1,59 @@
+# =========================================================
+# UNIT ELITE - PRIVATE / MACHINE STATE
+# =========================================================
+
+# Credentials / secrets
+*.uecred
+*.key
+.env
+.env.*
+secrets/
+.unit-elite-secrets/
+credential-backups/
+
+# Portable build output
+_portable_output/
+vendor/
+*.zip
+
+# WhatsApp private session/state
+**/store/
+**/whatsapp-store/
+
+# 9Router private state
+**/9router-data/
+**/data.sqlite
+**/data.sqlite-*
+**/*.sqlite-wal
+**/*.sqlite-shm
+
+# Runtime state
+*.pid
+*.log
+logs/
+runtime-state/
+
+# User task/work documents
+workspace/
+
+# Dependencies
+node_modules/
+
+# Temporary / backups
+*.bak
+*.pre-*
+*.tmp
+*.temp
+*.old
+*~
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Golden binary baselines
+integrations/9router/runtime/baseline/

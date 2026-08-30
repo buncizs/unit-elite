@@ -1,0 +1,19 @@
+{
+  "runtime_version": "1.0.0",
+  "tech_id": "TECH-0001-D7-R3",
+  "bind_host": "127.0.0.1",
+  "default_port": 20129,
+  "port_env_var": "UNIT_ELITE_RUNTIME_PORT",
+  "upstream_router": "http://127.0.0.1:20128/v1",
+  "logical_model": "unit-elite-runtime",
+  "gemini_quarantine": true,
+  "routing": {
+    "primary": "groq/openai/gpt-oss-120b",
+    "fallback": "ag/claude-sonnet-4-6",
+    "gemini_excluded": ["gemini/*", "ag/gemini-*"]
+  },
+  "timeout_ms": 30000,
+  "max_attempts": 2,
+  "pid_file": "runtime-gateway.pid",
+  "log_secrets": false
+}

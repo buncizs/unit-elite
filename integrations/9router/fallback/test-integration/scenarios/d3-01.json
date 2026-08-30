@@ -1,0 +1,9 @@
+{
+  "_label": "D3-01 normal route: primary groq healthy, no fallback expected",
+  "_expect": "ok=true; selected_model=groq/openai/gpt-oss-120b; attempted_models=[primary only]",
+  "messages": [
+    { "role": "user", "content": "Reply with exactly: PONG" }
+  ],
+  "temperature": 0,
+  "max_tokens": 64
+}

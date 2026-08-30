@@ -1,0 +1,8 @@
+{
+  "messages": [
+    { "role": "user", "content": "Return ONLY valid JSON with this exact shape, no extra text: {\"ok\": true, \"word\": \"PONG\"}" }
+  ],
+  "temperature": 0,
+  "max_tokens": 128,
+  "response_format": { "type": "json_object" }
+}

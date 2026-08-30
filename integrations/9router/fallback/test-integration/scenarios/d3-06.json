@@ -1,0 +1,6 @@
+{
+  "_label": "D3-06 non-fallback error: malformed payload -> INVALID_PAYLOAD, NO network, NO fallback",
+  "_expect": "ok=false; error_class=INVALID_PAYLOAD; eligible_for_fallback=false; attempted_models=[]; exit 1",
+  "model": "groq/openai/gpt-oss-120b",
+  "prompt": "this is not an openai chat payload - no messages field"
+}
