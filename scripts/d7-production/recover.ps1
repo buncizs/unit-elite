@@ -27,7 +27,7 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
     }
 
 
-    if ((Test-9RouterAppHealth) -and (Test-RuntimeHealth)) {
+    if ((Test-9RouterAppHealth) -and (Test-RuntimeHealth) -and -not (Test-WhatsAppTransportSuspended)) {
         if (-not (Test-WhatsAppHealth)) {
             Write-Host '[RECOVER] WhatsApp Bridge unhealthy; safe targeted restart.'
             [void](Stop-WhatsAppManaged)
@@ -35,7 +35,7 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         }
     }
 
-    if ((Test-9RouterAppHealth) -and (Test-RuntimeHealth) -and (Test-WhatsAppHealth)) {
+    if ((Test-9RouterAppHealth) -and (Test-RuntimeHealth) -and ((Test-WhatsAppHealth) -or (Test-WhatsAppTransportSuspended))) {
         [void](Start-OpenCodeManaged)
     }
 
@@ -58,3 +58,5 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
 Write-Host 'UNIT_ELITE_RECOVER_FAIL'
 Write-Host 'RECOVERY_POLICY: no reinstall, no credential reset, no SQLite deletion, no routing-policy modification.'
 exit 21
+
+if (Test-WhatsAppTransportSuspended) { Write-Host 'WHATSAPP_RECOVERY_SKIPPED_SUSPENDED fallback=EXCEL_WA_ME' }

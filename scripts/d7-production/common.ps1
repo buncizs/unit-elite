@@ -1,3 +1,22 @@
+
+# UNIT_ELITE_MANAGED:WHATSAPP_TRANSPORT_SUSPEND_V2_BEGIN
+function Get-WhatsAppTransportMode {
+    try {
+        $transportFile = Join-Path $Root 'integrations\whatsapp-service\transport-state.json'
+        if (-not (Test-Path -LiteralPath $transportFile)) { return 'ACTIVE' }
+        $transport = Get-Content -LiteralPath $transportFile -Raw | ConvertFrom-Json
+        if (-not $transport.mode) { return 'ACTIVE' }
+        return ([string]$transport.mode).ToUpperInvariant()
+    } catch {
+        return 'SUSPENDED'
+    }
+}
+
+function Test-WhatsAppTransportSuspended {
+    return ((Get-WhatsAppTransportMode) -eq 'SUSPENDED')
+}
+# UNIT_ELITE_MANAGED:WHATSAPP_TRANSPORT_SUSPEND_V2_END
+
 $ErrorActionPreference = 'Stop'
 
 $ProdDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -153,6 +172,11 @@ function Clear-OwnedWhatsAppState {
 }
 
 function Start-WhatsAppManaged {
+    if (Test-WhatsAppTransportSuspended) {
+        Clear-OwnedWhatsAppState
+        Write-Host 'WHATSAPP_SUSPENDED reason=bridge_under_repair fallback=EXCEL_WA_ME'
+        return $true
+    }
     if (Test-WhatsAppWideOpen) {
         Write-Host 'BLOCKED_WHATSAPP_EXPOSED_0.0.0.0'
         return $false
@@ -191,20 +215,32 @@ function Start-WhatsAppManaged {
 
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
 
+    Write-Host 'WHATSAPP_CONSOLE_OPENING'
+    Write-Host 'WHATSAPP_STATUS=CONNECTING'
+    Write-Host 'WHATSAPP_ACTION=If a QR code appears in the WhatsApp Bridge window, scan it from WhatsApp > Linked devices.'
+    Write-Host 'WHATSAPP_PAIRING_TIMEOUT_SECONDS=300'
+
+    # Deliberately do not redirect stdout/stderr here.
+    # The bridge console is the operator UI for session/QR status.
     $startArgs = @{
         FilePath = $WhatsAppBridgeExe
         WorkingDirectory = $WhatsAppBridgeDir
-        RedirectStandardOutput = $WhatsAppLog
-        RedirectStandardError = $WhatsAppErrLog
-        WindowStyle = 'Hidden'
+        WindowStyle = 'Normal'
         PassThru = $true
     }
-    $p = Start-Process @startArgs
 
-    for ($i = 0; $i -lt 30; $i++) {
+    $p = Start-Process @startArgs
+    $pairingNoticeShown = $false
+
+    # Allow enough time for either an existing session to reconnect or
+    # a human to scan a QR code. 600 x 500 ms = 300 seconds.
+    for ($i = 0; $i -lt 600; $i++) {
         Start-Sleep -Milliseconds 500
 
-        if ($p.HasExited) { break }
+        if ($p.HasExited) {
+            Write-Host "WHATSAPP_PROCESS_EXITED PID=$($p.Id) EXIT_CODE=$($p.ExitCode)"
+            break
+        }
 
         $l = Get-WhatsAppListener
         if (
@@ -214,23 +250,33 @@ function Start-WhatsAppManaged {
             (Test-WhatsAppHealth)
         ) {
             Save-OwnedWhatsApp -ProcessId $p.Id
+            Write-Host "WHATSAPP_CONNECTED PID=$($p.Id)"
             Write-Host "WHATSAPP_START_PASS PID=$($p.Id) PORT=$WhatsAppPort"
             return $true
+        }
+
+        # After ~10 seconds without health, make the expected QR action explicit.
+        if (-not $pairingNoticeShown -and $i -ge 20) {
+            Write-Host 'WHATSAPP_STATUS=WAITING_FOR_SESSION_OR_PAIRING'
+            Write-Host 'WHATSAPP_ACTION=Check the visible WhatsApp Bridge window. If QR is shown, scan it. No restart is required after scanning.'
+            $pairingNoticeShown = $true
         }
     }
 
     if (-not $p.HasExited -and (Test-IsCanonicalWhatsAppProcess $p.Id)) {
+        Write-Host "WHATSAPP_PAIRING_TIMEOUT PID=$($p.Id)"
         Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
     }
 
     Clear-OwnedWhatsAppState
 
-    Write-Host 'BLOCKED_WHATSAPP_NOT_READY_OR_PAIRING_REQUIRED'
-    if (Test-Path -LiteralPath $WhatsAppErrLog) {
-        Get-Content -LiteralPath $WhatsAppErrLog -Tail 20
+    if ($p.HasExited) {
+        Write-Host 'BLOCKED_WHATSAPP_PROCESS_EXITED_BEFORE_READY'
+    } else {
+        Write-Host 'BLOCKED_WHATSAPP_PAIRING_TIMEOUT'
     }
-    Write-Host "WHATSAPP_LOG=$WhatsAppLog"
-    Write-Host "WHATSAPP_ERR_LOG=$WhatsAppErrLog"
+
+    Write-Host 'WHATSAPP_ACTION=Run START-UNIT-ELITE.cmd again when ready. Do not delete the WhatsApp store.'
     return $false
 }
 
@@ -420,7 +466,8 @@ function Get-ComponentSnapshot {
         else { 'STOPPED' }
 
     $whatsapp =
-        if ($whatsappWide) { 'BLOCKED_EXPOSED' }
+        if (Test-WhatsAppTransportSuspended) { 'SUSPENDED' }
+        elseif ($whatsappWide) { 'BLOCKED_EXPOSED' }
         elseif (Test-WhatsAppHealth) {
             if (Test-OwnedWhatsApp) { 'READY_OWNED' } else { 'READY_EXTERNAL' }
         }

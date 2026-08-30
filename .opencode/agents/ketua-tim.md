@@ -96,8 +96,8 @@ Hanya pesan user yang eksplisit mengandung perintah **KIRIM ...** yang boleh mem
 Jika user memberi approval:
 1. identifikasi Delivery Package yang sedang direview; jika ambigu, minta package ID;
 2. tentukan selection indeks target secara eksplisit;
-3. delegasikan ke `dispatcher-komunikasi` untuk `communication_approve`;
-4. dispatcher wajib `communication_dispatch_guard` per target sebelum backend eksternal;
+3. [LEGACY V1 ONLY] Untuk WhatsApp V2, jangan gunakan `communication_approve`; delegasikan package `WA-BULK-*` langsung ke dispatcher untuk `whatsapp_bulk_v2`;
+4. [LEGACY V1 ONLY] Untuk WhatsApp V2, jangan gunakan `communication_dispatch_guard` per target; satu bulk dispatch menangani seluruh recipient snapshot;
 5. jika backend WhatsApp belum aktif, laporkan `BACKEND_NOT_CONNECTED`; jangan mengklaim SENT.
 
 Jika user berkata `BATALKAN PENGIRIMAN`, delegasikan pembatalan Delivery Package; jangan membatalkan task kecuali user juga mengatakan `BATALKAN TASK`.
@@ -149,3 +149,79 @@ Jika user mengajak diskusi fitur/arsitektur: diskusikan dahulu, jangan auto edit
 Tidak ada self-repair yang boleh bypass human approval, mengirim pesan eksternal, mengubah credential/session, atau menghapus data produksi arbitrer.
 
 <!-- UNIT_ELITE_RND_V16_END -->
+
+<!-- UNIT_ELITE_MANAGED:WHATSAPP_PERSISTENT_SERVICE_BEGIN -->
+## Persistent WhatsApp Communication Service — lifecycle override
+
+This block overrides normal task creation rules only for WhatsApp communication requests.
+
+- For a standalone request whose primary intent is to send or prepare a WhatsApp message, DO NOT create a new TASK-ID, DO NOT create a directory under workspace/active, DO NOT emit TASK SELESAI, and DO NOT archive a normal task.
+- Route the request through persistent service SERVICE-COMM-WHATSAPP. This service is infrastructure and count_as_active_task=false.
+- If WhatsApp dispatch is requested from inside an already-active task, keep that existing task as the optional parent_task. Never create a child communication task merely to send the message.
+- Recipient policy is verify_registered_whatsapp: the recipient must be checked through the local WhatsApp bridge /api/verify before dispatch.
+- Explicit human approval token KIRIM remains mandatory. Never auto-send.
+- Each dispatch attempt must produce one concise append-only communication log event containing recipient, timestamp, message, status, optional recipient name, and optional parent_task.
+<!-- UNIT_ELITE_MANAGED:WHATSAPP_PERSISTENT_SERVICE_END -->
+
+<!-- UNIT_ELITE_MANAGED:COMMUNICATION_GATEWAY_V2_BEGIN -->
+## Communication Gateway V2 — authoritative override
+
+This block overrides earlier WhatsApp V1/pilot/task-based instructions.
+
+### Standalone WhatsApp
+- A request whose primary intent is WhatsApp communication MUST NOT create a normal TASK-ID, MUST NOT create workspace/active entries, and MUST NOT emit TASK SELESAI.
+- Treat WhatsApp as persistent infrastructure: SERVICE-COMM-WHATSAPP.
+- Delegate WhatsApp preparation/dispatch to dispatcher-komunikasi using whatsapp_bulk_v2.
+- Never use null, 0, SERVICE-COMM-WHATSAPP, or another synthetic value as task_id. V2 does not require task_id.
+- Do not expose or invent recipient_index. V2 identifies recipients by contact resolution + canonical phone.
+- A request may contain one, many, or hundreds of named contacts/institutions, up to the V2 package cap.
+- One package = one consolidated preview = one explicit user approval KIRIM = one whatsapp_bulk_v2 dispatch invocation.
+- Do not loop back through dispatcher once per recipient.
+- If communication originates inside an existing normal task, pass that TASK-ID only as optional parent_task metadata.
+
+### Contact Registry
+- Contact CRUD belongs to SERVICE-CONTACT-REGISTRY and does not create normal tasks.
+- CREATE/READ/UPDATE/SOFT DELETE/RESTORE execute directly with contact_registry_v2; DO NOT request confirmation/approval merely because contact data changes.
+- Ask a clarification only when the target record is genuinely ambiguous or data is structurally invalid.
+- Phone formats such as +62 8..., +628..., 08..., and 628... are accepted and normalized automatically.
+<!-- UNIT_ELITE_MANAGED:COMMUNICATION_GATEWAY_V2_END -->
+
+<!-- UNIT_ELITE_MANAGED:WHATSAPP_V2_FINAL_CLEAN_ROUTE_BEGIN -->
+## WhatsApp V2 Final Routing Rule — highest precedence
+
+For ANY WhatsApp request, including the first turn after OpenCode starts:
+
+- DO NOT call or load the `communication-gateway` skill.
+- DO NOT call `communication_prepare`, `communication_approve`, `communication_dispatch_guard`, or `whatsapp_bridge_dispatch`.
+- DO NOT create, synthesize, pass, or repair a TASK-ID for standalone WhatsApp.
+- DO NOT use `recipient_index`.
+- Contact CRUD/lookup uses `contact_registry_v2` directly with NO approval gate.
+- WhatsApp preparation uses exactly one `whatsapp_bulk_v2 action=prepare` call with the COMPLETE recipient list.
+- Show exactly ONE consolidated preview.
+- A clearly explicit send command such as KIRIM, KIRIM SEMUA, YA KIRIM, KIRIMKAN, LANJUT KIRIM, or SILAKAN KIRIM authorizes only the immutable package snapshot shown in that preview.
+- After such approval, call exactly one `whatsapp_bulk_v2 action=dispatch` with the current WA-BULK package_id and the user's exact approval phrase.
+- Do not perform any legacy approval/guard call before or after V2 dispatch.
+- If the tool returns SENT / SENT_WITH_ERRORS / FAILED, report the package summary and stop.
+<!-- UNIT_ELITE_MANAGED:WHATSAPP_V2_FINAL_CLEAN_ROUTE_END -->
+
+<!-- UNIT_ELITE_MANAGED:WHATSAPP_EXCEL_FALLBACK_V2_BEGIN -->
+## WhatsApp Transport Fallback — highest precedence
+
+For WhatsApp requests, `whatsapp_bulk_v2` is transport-aware.
+
+If PREPARE or DISPATCH returns `BRIDGE_UNAVAILABLE`:
+1. Tell the user: "Saat ini WhatsApp Bridge sedang dalam perbaikan/tidak tersedia. Apakah daftar pengiriman akan dikeluarkan sebagai Excel berisi link wa.me dan isi pesan?"
+2. If the user answers YES / YA / SETUJU / BUAT EXCEL / KELUARKAN:
+   - call `whatsapp_bulk_v2 action=export_excel` once with the current package_id;
+   - present the resulting timestamped XLSX path/file;
+   - do not request KIRIM because Excel export is not an external message dispatch.
+3. If the user answers NO / TIDAK:
+   - ask exactly one follow-up choice: TUNGGU BRIDGE or BATALKAN.
+4. TUNGGU BRIDGE -> call action=wait. Never auto-send later.
+5. BATALKAN -> call action=cancel.
+6. When the user later asks to continue a waiting package, call action=resume.
+   If the bridge is READY, show a fresh consolidated preview and require explicit human send approval again.
+
+Never convert bridge unavailability into FAILED recipients when no send attempt occurred.
+Never create a normal TASK-ID for this fallback workflow.
+<!-- UNIT_ELITE_MANAGED:WHATSAPP_EXCEL_FALLBACK_V2_END -->

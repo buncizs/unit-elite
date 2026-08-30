@@ -59,7 +59,11 @@ if (-not (Start-WhatsAppManaged)) {
     Write-Host 'BLOCKED_WHATSAPP_START'
     exit 17
 }
-Write-Host 'WHATSAPP_READY endpoint=127.0.0.1:8080/api'
+if (Test-WhatsAppTransportSuspended) {
+    Write-Host 'WHATSAPP_SUSPENDED fallback=EXCEL_WA_ME'
+} else {
+    Write-Host 'WHATSAPP_READY endpoint=127.0.0.1:8080/api'
+}
 
 if (-not (Start-OpenCodeManaged)) { exit 19 }
 
@@ -72,7 +76,11 @@ if (
     $s.WhatsApp -eq 'READY_OWNED' -and
     $s.OpenCode -eq 'RUNNING_OWNED'
 ) {
-    Write-Host 'UNIT_ELITE_START_PASS'
+    if ($s.WhatsApp -eq 'SUSPENDED') {
+        Write-Host 'UNIT_ELITE_START_PASS_FALLBACK WHATSAPP=SUSPENDED FALLBACK=EXCEL_WA_ME'
+    } else {
+        Write-Host 'UNIT_ELITE_START_PASS'
+    }
     exit 0
 }
 

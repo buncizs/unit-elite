@@ -7,6 +7,9 @@ Write-Host "STATUS=$($s.Overall)"
 Write-Host "ROUTER=$($s.Router) ENDPOINT=127.0.0.1:20128"
 Write-Host "RUNTIME=$($s.Runtime) ENDPOINT=127.0.0.1:20129"
 Write-Host "WHATSAPP=$($s.WhatsApp) ENDPOINT=127.0.0.1:8080/api"
+if ($s.WhatsApp -eq 'SUSPENDED') {
+    Write-Host 'WHATSAPP_FALLBACK=EXCEL_WA_ME'
+}
 Write-Host "OPENCODE=$($s.OpenCode)"
 
 $routerListener = Get-LoopbackListener $RouterPort

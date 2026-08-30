@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "mode": "SUSPENDED",
+  "reason": "bridge_under_repair",
+  "fallback": "EXCEL_WA_ME",
+  "updated_at": "2026-08-30T13:57:35.253Z",
+  "note": "Communication Gateway remains usable. Real WhatsApp transport is disabled until explicitly resumed."
+}

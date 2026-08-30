@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "service_id": "SERVICE-COMM-WHATSAPP",
+  "contact_service_id": "SERVICE-CONTACT-REGISTRY",
+  "standalone_task_id_required": false,
+  "recipient_index_exposed_to_agent": false,
+  "recipient_resolution": [
+    "contact_registry",
+    "direct_phone"
+  ],
+  "phone_normalization": [
+    "+62 8xxx",
+    "+628xxx",
+    "08xxx",
+    "628xxx",
+    "spaces-dashes-parentheses"
+  ],
+  "contact_crud": {
+    "approval_required": false,
+    "create": "DIRECT",
+    "read": "DIRECT",
+    "update": "DIRECT",
+    "delete": "SOFT_DELETE_DIRECT",
+    "restore": "DIRECT",
+    "ambiguity_resolution_required": true
+  },
+  "whatsapp_dispatch": {
+    "human_approval_required": true,
+    "approval_phrase": "KIRIM",
+    "one_preview_per_package": true,
+    "one_dispatch_tool_call_per_package": true,
+    "max_recipients_per_package": 500,
+    "sequential_send_delay_ms": 250,
+    "verify_before_send": true,
+    "deduplicate_by_canonical_phone": true,
+    "explicit_approval_phrases": [
+      "KIRIM",
+      "KIRIM SEMUA",
+      "YA KIRIM",
+      "KIRIMKAN",
+      "LANJUT KIRIM",
+      "SILAKAN KIRIM"
+    ],
+    "legacy_v1_route_for_wa_bulk": "FORBIDDEN",
+    "communication_gateway_skill_for_v2": "DO_NOT_CALL"
+  },
+  "whatsapp_transport": {
+    "transport_state_file": "integrations/whatsapp-service/transport-state.json",
+    "suspended_behavior": "OFFER_EXCEL_WA_ME",
+    "fallback_export_format": "XLSX",
+    "fallback_export_sheets": [
+      "PENGIRIMAN",
+      "RINGKASAN"
+    ],
+    "wait_auto_send": false,
+    "resume_requires_fresh_preview": true,
+    "resume_requires_human_approval": true
+  }
+}
