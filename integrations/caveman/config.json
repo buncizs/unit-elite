@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "mode": "b2",
+  "listen_host": "127.0.0.1",
+  "port": 20127,
+  "upstream": "http://127.0.0.1:20129/v1",
+  "downstream_to": "http://127.0.0.1:20128/v1",
+  "compress_threshold_tokens": 0
+}

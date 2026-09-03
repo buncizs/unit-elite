@@ -38,6 +38,13 @@ const crypto = require('node:crypto');
 const { FallbackController, sanitizeCompletion, validatePayload } =
   require('../fallback/fallback-controller.cjs');
 
+// Caveman B2 fail-open router (optional token-saving proxy between this gateway
+// and 9Router). Fail-open: never breaks inference if the proxy is unavailable.
+const {
+  resolveRoute: resolveCavemanRoute,
+  DEFAULT_CONFIG_PATH: CAVEMAN_CONFIG_PATH,
+} = require('../../caveman/caveman-router.cjs');
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -59,8 +66,11 @@ function loadConfig() {
       logical_model: 'unit-elite-runtime',
       gemini_quarantine: true,
       routing: {
-        primary: 'groq/openai/gpt-oss-120b',
-        fallback: 'ag/claude-sonnet-4-6',
+        //primary: 'groq/openai/gpt-oss-120b',
+        //fallback: 'ag/claude-sonnet-4-6',
+		primary: 'bitdeer/deepseek-ai/DeepSeek-V4-Flash',
+        fallback: 'b.ai/deepseek-v4-flash',
+		
         gemini_excluded: ['gemini/*', 'ag/gemini-*'],
       },
       timeout_ms: 30000,
@@ -85,8 +95,10 @@ function isGeminiQuarantined(model) {
 // Routing policy — Gemini EXCLUDED per quarantine.
 // These are the candidate models forwarded to FallbackController.
 const ROUTING_POLICY = {
-  primary: 'groq/openai/gpt-oss-120b',
-  fallback: 'ag/claude-sonnet-4-6',
+  //primary: 'groq/openai/gpt-oss-120b',
+  //fallback: 'ag/claude-sonnet-4-6',
+	primary: 'bitdeer/deepseek-ai/DeepSeek-V4-Flash',
+    fallback: 'b.ai/deepseek-v4-flash',
 };
 
 // Verify quarantine at module load — fail fast if someone misconfigures.
@@ -98,6 +110,38 @@ if (isGeminiQuarantined(ROUTING_POLICY.primary) || isGeminiQuarantined(ROUTING_P
 // Read dynamically so tests can override via env before/after require.
 function getUpstreamRouter() {
   return (process.env.UNIT_ELITE_UPSTREAM_URL || 'http://127.0.0.1:20128/v1').replace(/\/+$/, '');
+}
+
+// ---------------------------------------------------------------------------
+// Caveman B2 route resolution (fail-open)
+// ---------------------------------------------------------------------------
+//
+// The optional Caveman proxy may be inserted between this gateway (:20129) and
+// 9Router (:20128). Route decision is resolved per request and is ALWAYS
+// fail-open: an unreachable / disabled / errored proxy never blocks inference —
+// the request falls back straight to the direct 9Router endpoint.
+//
+// Returns `{ endpoint, mode, reason }` (caveman-router contract).
+async function resolveInferenceRoute(options = {}) {
+  // Allow tests to force Caveman probes directly to a specific config or host.
+  return resolveCavemanRoute({
+    configPath: options.cavemanConfig || CAVEMAN_CONFIG_PATH,
+    directEndpoint: getUpstreamRouter(),
+    probe: options.probe !== false,
+    healthTimeoutMs: options.cavemanHealthTimeoutMs,
+  });
+}
+
+// Log the Caveman routing decision for a request WITHOUT leaking any payload.
+// `mode` is one of: 'caveman' | 'bypass-unavailable' | 'bypass-disabled'.
+function logCavemanDecision(mode, reason, requestId) {
+  if (mode === 'caveman') {
+    safeLog('[runtime-gateway] caveman=ACTIVE req=' + requestId + ' ' + (reason || ''));
+  } else if (mode === 'bypass-unavailable') {
+    safeLog('[runtime-gateway] caveman=BYPASS (unavailable) req=' + requestId + ' ' + (reason || ''));
+  } else {
+    safeLog('[runtime-gateway] caveman=BYPASS (disabled) req=' + requestId + ' ' + (reason || ''));
+  }
 }
 
 const BIND_HOST = '127.0.0.1';
@@ -625,7 +669,11 @@ async function streamFromProvider(payload, model, endpoint, apiKey, clientRes, r
 
 async function handleChatStream(parsedPayload, res, requestId) {
   const cfg = loadConfig();
-  const endpoint = getUpstreamRouter();
+  // Resolve Caveman route per request (fail-open: bypass to 9Router if the
+  // proxy is not enabled or unreachable). Log the decision explicitly.
+  const route = await resolveInferenceRoute();
+  const endpoint = route.endpoint;
+  logCavemanDecision(route.mode, route.reason, requestId);
   const apiKey = getApiKey();
   const models = [ROUTING_POLICY.primary, ROUTING_POLICY.fallback];
 
@@ -689,7 +737,11 @@ async function handleChatStream(parsedPayload, res, requestId) {
 // ---------------------------------------------------------------------------
 
 async function handleChatNonStream(parsedPayload, res, requestId) {
-  const controller = buildController();
+  // Resolve Caveman route per request (fail-open: bypass to 9Router if the
+  // proxy is not enabled or unreachable). Log the decision explicitly.
+  const route = await resolveInferenceRoute();
+  logCavemanDecision(route.mode, route.reason, requestId);
+  const controller = buildController({ endpoint: route.endpoint });
 
   // Strip the logical model; FallbackController will use ROUTING_POLICY models.
   const forwardPayload = Object.assign({}, parsedPayload);
@@ -947,6 +999,8 @@ module.exports = {
   isPortFree,
   isGeminiQuarantined,
   normalizeConversationPayload,
+  resolveInferenceRoute,
+  logCavemanDecision,
   ROUTING_POLICY,
   LOGICAL_MODEL,
   BIND_HOST,
