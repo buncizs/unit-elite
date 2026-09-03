@@ -26,6 +26,8 @@ $OpenCodeState = Join-Path $StateDir 'opencode-owned.json'
 $RouterPort = 20128
 $RuntimePort = 20129
 $WhatsAppPort = 8080
+$CavemanPort = 20127
+$CavemanLauncher = Join-Path $Root 'integrations\caveman\start-caveman.cmd'
 $WhatsAppBridgeDir = 'D:\OpenCode\whatsapp-mcp-main\whatsapp-bridge'
 $WhatsAppBridgeExe = Join-Path $WhatsAppBridgeDir 'whatsapp-bridge.exe'
 $WhatsAppState = Join-Path $StateDir 'whatsapp-owned.json'
@@ -326,6 +328,60 @@ function Stop-WhatsAppManaged {
 }
 
 
+# ============================================================================
+# CAVEMAN (optional B2 proxy, FAIL-OPEN). Binds 127.0.0.1:20127.
+# Never blocks Unit Elite startup: any failure => CAVEMAN=BYPASS, continue.
+# ============================================================================
+
+function Test-CavemanWideOpen {
+    $x = Get-NetTCPConnection -LocalPort $CavemanPort -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalAddress -eq '0.0.0.0' } |
+        Select-Object -First 1
+    return [bool]$x
+}
+
+function Get-CavemanListener {
+    Get-NetTCPConnection -LocalPort $CavemanPort -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalAddress -eq '127.0.0.1' } |
+        Select-Object -First 1
+}
+
+function Start-CavemanManaged {
+    if (Test-CavemanWideOpen) {
+        Write-Host 'CAVEMAN=BYPASS reason=port_20127_wide_open'
+        return $true
+    }
+
+    $listener = Get-CavemanListener
+    if ($listener) {
+        Write-Host 'CAVEMAN=ACTIVE endpoint=127.0.0.1:20127 already_running'
+        return $true
+    }
+
+    if (-not (Test-Path -LiteralPath $CavemanLauncher)) {
+        Write-Host "CAVEMAN=BYPASS reason=launcher_missing path=$CavemanLauncher"
+        return $true
+    }
+
+    Write-Host 'CAVEMAN_STATUS=STARTING'
+    $launcherDir = Split-Path -Parent $CavemanLauncher
+    $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $CavemanLauncher) -WorkingDirectory $launcherDir -WindowStyle 'Normal' -PassThru
+
+    # FAIL-OPEN probe: wait up to 15s (30 x 500ms) for a loopback listener on 20127.
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Milliseconds 500
+        $l = Get-CavemanListener
+        if ($l) {
+            Write-Host 'CAVEMAN=ACTIVE endpoint=127.0.0.1:20127'
+            return $true
+        }
+        if ($p.HasExited) { break }
+    }
+
+    Write-Host 'CAVEMAN=BYPASS reason=not_listening_after_start fail_open=true'
+    return $true
+}
+
 function Resolve-OpenCodePath {
     $candidates = @(
         (Join-Path $env:LOCALAPPDATA 'Programs\@opencode-aidesktop\OpenCode.exe')
@@ -480,6 +536,12 @@ function Get-ComponentSnapshot {
         elseif (Test-OwnedOpenCode) { 'RUNNING_OWNED' }
         else { 'RUNNING_EXTERNAL' }
 
+    # CAVEMAN is optional (FAIL-OPEN): never gates overall status.
+    $caveman =
+        if (Test-CavemanWideOpen) { 'BLOCKED_EXPOSED' }
+        elseif (Get-CavemanListener) { 'ACTIVE' }
+        else { 'BYPASS' }
+
     $overall =
         if ($router -like 'BLOCKED*' -or $runtime -like 'BLOCKED*' -or $whatsapp -like 'BLOCKED*') { 'BLOCKED' }
         elseif ($router -eq 'STOPPED' -and $runtime -eq 'STOPPED' -and $whatsapp -eq 'STOPPED') { 'STOPPED' }
@@ -497,6 +559,7 @@ function Get-ComponentSnapshot {
         Runtime = $runtime
         WhatsApp = $whatsapp
         OpenCode = $openCode
+        Caveman = $caveman
     }
 }
 

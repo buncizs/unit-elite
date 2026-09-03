@@ -49,13 +49,32 @@ if %ERRORLEVEL%==0 (
 )
 
 REM ---------------------------------------------------------------------------
-REM  STEP 3 - Mulai proxy Caveman.
-REM  CATATAN: Format invoke binary Caveman belum terverifikasi di lingkungan ini
-REM  [NEEDS_VERIFICATION]. Saat binary tersedia, lengkapi baris di bawah dengan
-REM  flag --bind / --port yang sesuai, lalu hapus guard exit di bawah.
+REM  STEP 3 - Mulai proxy Caveman (mode B2, kompresi input).
+REM  Suntik credential NINEROUTER_KEY agar forward ke 9Router :20128 diterima.
 REM ---------------------------------------------------------------------------
 echo [CAVEMAN][INFO ] Binary Caveman terdeteksi di: %BIN%
-echo [CAVEMAN][INFO ] Proxy akan bind 127.0.0.1:%BIN_PORT% (mode B2).
-echo [CAVEMAN][WARN ] Invoke format [NEEDS_VERIFICATION]; tidak menjalankan nyata.
 
-exit /b 0
+REM --- Muat NINEROUTER_KEY dari env atau ~/.unit-elite-secrets/9router.key ---
+set "NINEROUTER_KEY=%NINEROUTER_KEY%"
+if not defined NINEROUTER_KEY (
+  set "NINEROUTER_KEY=%NINEROUTER_API_KEY%"
+)
+if not defined NINEROUTER_KEY (
+  if exist "%USERPROFILE%\.unit-elite-secrets\9router.key" (
+    set /p NINEROUTER_KEY=<"%USERPROFILE%\.unit-elite-secrets\9router.key"
+  )
+)
+
+if not defined NINEROUTER_KEY (
+  echo [CAVEMAN][WARN ] NINEROUTER_KEY tidak ditemukan. Forward ke 9Router bisa gagal auth.
+)
+
+REM --- Konfigurasi proxy ---
+set "CAVE_SSRF_ALLOWLIST=127.0.0.1:20128"
+set "CAVEMAN_CONFIG=%~dp0caveman.yaml"
+
+echo [CAVEMAN][INFO ] Proxy bind 127.0.0.1:20127 (mode B2, SSRF-allowlist=9Router:20128).
+echo [CAVEMAN][INFO ] Menjalankan: %BIN% start
+call %BIN% start
+echo [CAVEMAN][EXIT ] exit=%errorlevel%
+exit /b %errorlevel%

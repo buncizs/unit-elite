@@ -29,6 +29,9 @@ if (-not $routerReady) {
 }
 Write-Host 'ROUTER_READY endpoint=127.0.0.1:20128'
 
+Write-Host '[START] Starting optional Caveman proxy (fail-open)...'
+[void](Start-CavemanManaged)
+
 if (Test-WideOpen $RuntimePort) {
     Write-Host 'BLOCKED_RUNTIME_EXPOSED_0.0.0.0'
     exit 14
@@ -68,7 +71,8 @@ if (Test-WhatsAppTransportSuspended) {
 if (-not (Start-OpenCodeManaged)) { exit 19 }
 
 $s = Get-ComponentSnapshot
-Write-Host "UNIT_ELITE_STATUS=$($s.Overall) ROUTER=$($s.Router) RUNTIME=$($s.Runtime) WHATSAPP=$($s.WhatsApp) OPENCODE=$($s.OpenCode)"
+Write-Host "UNIT_ELITE_STATUS=$($s.Overall) ROUTER=$($s.Router) RUNTIME=$($s.Runtime) WHATSAPP=$($s.WhatsApp) OPENCODE=$($s.OpenCode) CAVEMAN=$($s.Caveman)"
+Write-Host "CAVEMAN_STATUS value=$($s.Caveman)"
 
 if (
     $s.Router -eq 'READY' -and

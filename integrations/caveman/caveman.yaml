@@ -1,0 +1,31 @@
+# ============================================================================
+# caveman.yaml - Caveman proxy config for Unit Elite (mode B2)
+# ============================================================================
+# Jalur: Runtime Gateway (:20129) -> [CAVEMAN PROXY B2] -> 9Router (:20128/v1)
+#
+# Proxy Caveman berjalan sebagai listener OPTIONAL di 127.0.0.1:20127 dan
+# meneruskan (proxy/forward) request ke upstream 9Router loopback :20128.
+#
+# File ini dijadikan referensi/resmi oleh launcher start-caveman.cmd dan
+# disuntikkan via env `CAVEMAN_CONFIG` saat menjalankan `caveman start`.
+# (Caveman CLI sendiri juga menyalin nilai ke ~/.caveman/caveman.yaml bila
+# diperlukan — lihat start-caveman.cmd.)
+#
+# SSRF allowlist: karena upstream kita adalah 9Router lokal (loopback/private
+# 127.0.0.1:20128), proxy WAJIB diberi env `CAVE_SSRF_ALLOWLIST=127.0.0.1:20128`
+# agar kirimannya diteruskan (loopback diblokir allowlist default). Tanpa itu,
+# proxy menolak forward ke 9Router.
+#
+# Format ini adalah skema native Go proxy Caveman (bukan skema wrapper CLI).
+# `mode: compress` = aktifkan Engine transforms yang eligible.
+# ============================================================================
+
+label: unit-elite
+mode: compress       # mode aktif utk kompresi input
+listen: 127.0.0.1:20127   # port kita (loopback-only)
+optimizers: {}
+subscription_compress: false
+toolschema_strip: false
+breakpoint_plan: frontier
+providers: {}
+compat: {}
