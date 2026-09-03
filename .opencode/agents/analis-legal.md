@@ -4,7 +4,9 @@ mode: subagent
 color: info
 permission:
   task: deny
-  edit: deny
+  edit:
+    "*": deny
+    "workspace/active/**": allow
   bash: deny
   read: allow
   glob: allow
@@ -39,3 +41,5 @@ RECOMMENDATION:
 UNCERTAINTIES:
 NEEDS-SUPPORT:
 CONFIDENCE:
+
+Bila output berukuran besar, tulis hasil ke `workspace/active/<TASK-ID>/working/<STAGE>-<slug>.md` menggunakan tool write/edit, lalu kembalikan path-nya; jangan menampilkan seluruh isi penuh di chat.

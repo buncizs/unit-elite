@@ -1,0 +1,8 @@
+{
+  "name": "unit-elite-caveman",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Unit Elite Caveman proxy integration skeleton (optional token-saving proxy on Runtime :20129 <-> 9Router :20128 path, mode B2). DRAFT - not enabled, not production.",
+  "dependencies": {}
+}

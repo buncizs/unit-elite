@@ -1,8 +1,8 @@
 {
-  "name": "unit-elite-opencode-v1.5",
-  "version": "1.5.0",
+  "name": "unit-elite-opencode-v1.7",
+  "version": "1.7.0",
   "private": true,
   "type": "module",
-  "description": "Unit Elite OpenCode Desktop v1.5 \u2014 Communication Gateway, human approval, Narahubung, artifact engine, and atomic task lifecycle",
+  "description": "Unit Elite OpenCode Desktop v1.7 \u2014 Communication Gateway, human approval, Narahubung, artifact engine, and atomic task lifecycle. v1.7 optimasi biaya token: agent write-tool (P1), write-to-disk handoff (P3), integrasi Caveman.",
   "dependencies": {}
 }
