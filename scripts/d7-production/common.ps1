@@ -26,7 +26,7 @@ $OpenCodeState = Join-Path $StateDir 'opencode-owned.json'
 $RouterPort = 20128
 $RuntimePort = 20129
 $WhatsAppPort = 8080
-$CavemanPort = 20127
+$CavemanPort = 8787
 $CavemanLauncher = Join-Path $Root 'integrations\caveman\start-caveman.cmd'
 $WhatsAppBridgeDir = 'D:\OpenCode\whatsapp-mcp-main\whatsapp-bridge'
 $WhatsAppBridgeExe = Join-Path $WhatsAppBridgeDir 'whatsapp-bridge.exe'
@@ -329,7 +329,7 @@ function Stop-WhatsAppManaged {
 
 
 # ============================================================================
-# CAVEMAN (optional B2 proxy, FAIL-OPEN). Binds 127.0.0.1:20127.
+# CAVEMAN (optional B2 proxy, FAIL-OPEN). Binds 127.0.0.1:8787.
 # Never blocks Unit Elite startup: any failure => CAVEMAN=BYPASS, continue.
 # ============================================================================
 
@@ -348,13 +348,13 @@ function Get-CavemanListener {
 
 function Start-CavemanManaged {
     if (Test-CavemanWideOpen) {
-        Write-Host 'CAVEMAN=BYPASS reason=port_20127_wide_open'
+        Write-Host 'CAVEMAN=BYPASS reason=port_8787_wide_open'
         return $true
     }
 
     $listener = Get-CavemanListener
     if ($listener) {
-        Write-Host 'CAVEMAN=ACTIVE endpoint=127.0.0.1:20127 already_running'
+        Write-Host 'CAVEMAN=ACTIVE endpoint=127.0.0.1:8787 already_running'
         return $true
     }
 
@@ -367,12 +367,12 @@ function Start-CavemanManaged {
     $launcherDir = Split-Path -Parent $CavemanLauncher
     $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $CavemanLauncher) -WorkingDirectory $launcherDir -WindowStyle 'Normal' -PassThru
 
-    # FAIL-OPEN probe: wait up to 15s (30 x 500ms) for a loopback listener on 20127.
+    # FAIL-OPEN probe: wait up to 15s (30 x 500ms) for a loopback listener on 8787.
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Milliseconds 500
         $l = Get-CavemanListener
         if ($l) {
-            Write-Host 'CAVEMAN=ACTIVE endpoint=127.0.0.1:20127'
+            Write-Host 'CAVEMAN=ACTIVE endpoint=127.0.0.1:8787'
             return $true
         }
         if ($p.HasExited) { break }

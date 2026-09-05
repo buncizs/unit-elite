@@ -41,7 +41,8 @@ const DEFAULT_CONFIG_PATH = path.join(__dirname, 'config.json');
 
 // Default port the Caveman proxy is expected to listen on (B2 listener side).
 // The proxy receives requests on this port and forwards them to 9Router.
-const DEFAULT_CAVEMAN_PORT = 20127;
+// 8787 = `caveman start` default (sendjaan; diseragamkan, tidak bergantung env).
+const DEFAULT_CAVEMAN_PORT = 8787;
 const DEFAULT_CAVEMAN_HOST = '127.0.0.1';
 
 // Health-probe timeout (short, so an unreachable proxy never stalls inference).

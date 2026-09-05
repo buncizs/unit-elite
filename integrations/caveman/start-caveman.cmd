@@ -14,7 +14,7 @@ REM    2. Binder WAJIB 127.0.0.1:<port>, TANPA 0.0.0.0 (0.0.0.0 -> FAIL CLOSED e
 REM ============================================================================
 
 setlocal
-set "BIN_PORT=20127"
+set "BIN_PORT=8787"
 
 REM ---------------------------------------------------------------------------
 REM  STEP 1 - Deteksi binary Caveman (JANGAN install otomatis).
@@ -73,7 +73,7 @@ REM --- Konfigurasi proxy ---
 set "CAVE_SSRF_ALLOWLIST=127.0.0.1:20128"
 set "CAVEMAN_CONFIG=%~dp0caveman.yaml"
 
-echo [CAVEMAN][INFO ] Proxy bind 127.0.0.1:20127 (mode B2, SSRF-allowlist=9Router:20128).
+echo [CAVEMAN][INFO ] Proxy bind 127.0.0.1:8787 (mode B2, SSRF-allowlist=9Router:20128).
 echo [CAVEMAN][INFO ] Menjalankan: %BIN% start
 call %BIN% start
 echo [CAVEMAN][EXIT ] exit=%errorlevel%

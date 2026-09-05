@@ -3,8 +3,10 @@
 # ============================================================================
 # Jalur: Runtime Gateway (:20129) -> [CAVEMAN PROXY B2] -> 9Router (:20128/v1)
 #
-# Proxy Caveman berjalan sebagai listener OPTIONAL di 127.0.0.1:20127 dan
+# Proxy Caveman berjalan sebagai listener OPTIONAL di 127.0.0.1:8787 dan
 # meneruskan (proxy/forward) request ke upstream 9Router loopback :20128.
+# (Port 8787 = default `caveman start`; diseragamkan agar tidak bergantung pada
+#  env CAVEMAN_CONFIG yang ternyata tidak ter-propagation ke binary caveman.)
 #
 # File ini dijadikan referensi/resmi oleh launcher start-caveman.cmd dan
 # disuntikkan via env `CAVEMAN_CONFIG` saat menjalankan `caveman start`.
@@ -22,7 +24,7 @@
 
 label: unit-elite
 mode: compress       # mode aktif utk kompresi input
-listen: 127.0.0.1:20127   # port kita (loopback-only)
+listen: 127.0.0.1:8787   # port kita (loopback-only) — default `caveman start`
 optimizers: {}
 subscription_compress: false
 toolschema_strip: false
