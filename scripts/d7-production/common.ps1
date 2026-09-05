@@ -346,6 +346,49 @@ function Get-CavemanListener {
         Select-Object -First 1
 }
 
+function Get-CavemanBinaryPath {
+    # Resolve the 'caveman' binary via PowerShell command discovery (more reliable
+    # than cmd `where`, which does not reliably inherit PATH from the PowerShell
+    # session). Prefer an Application (.exe/.cmd) so Start-Process can launch it
+    # directly; fall back to a PowerShell shim (.ps1) launched via powershell -File.
+    $all = @(Get-Command caveman -All -ErrorAction SilentlyContinue)
+    if ($all.Count -eq 0) { return $null }
+
+    foreach ($c in $all) {
+        if ($c.CommandType -eq 'Application' -and $c.Source) {
+            try {
+                $resolved = (Resolve-Path -LiteralPath $c.Source -ErrorAction Stop).Path
+                if ($resolved) {
+                    return [pscustomobject]@{ Exe = $resolved; Kind = 'Application' }
+                }
+            } catch {}
+        }
+    }
+
+    foreach ($c in $all) {
+        if ($c.CommandType -eq 'ExternalScript' -and $c.Source -and ($c.Source -match '\.ps1$')) {
+            if (Test-Path -LiteralPath $c.Source) {
+                return [pscustomobject]@{ Exe = $c.Source; Kind = 'ExternalScript' }
+            }
+        }
+    }
+
+    return $null
+}
+
+function Get-CavemanNinerouterKey {
+    # Prefer an already-set env var, then ~/.unit-elite-secrets/9router.key.
+    if (-not [string]::IsNullOrWhiteSpace($env:NINEROUTER_KEY)) {
+        return $env:NINEROUTER_KEY.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:NINEROUTER_API_KEY)) {
+        return $env:NINEROUTER_API_KEY.Trim()
+    }
+    $k = Read-9RouterKey
+    if (-not [string]::IsNullOrWhiteSpace($k)) { return $k.Trim() }
+    return $null
+}
+
 function Start-CavemanManaged {
     if (Test-CavemanWideOpen) {
         Write-Host 'CAVEMAN=BYPASS reason=port_8787_wide_open'
@@ -358,14 +401,87 @@ function Start-CavemanManaged {
         return $true
     }
 
-    if (-not (Test-Path -LiteralPath $CavemanLauncher)) {
-        Write-Host "CAVEMAN=BYPASS reason=launcher_missing path=$CavemanLauncher"
+    $bin = Get-CavemanBinaryPath
+    if (-not $bin) {
+        Write-Host 'CAVEMAN=BYPASS reason=cmd_not_found'
         return $true
     }
 
+    # --- Build required env for the child process ---
+    $caveConfig = Join-Path $Root 'integrations\caveman\caveman.yaml'
+    if (-not (Test-Path -LiteralPath $caveConfig)) {
+        Write-Host "CAVEMAN=BYPASS reason=config_missing path=$caveConfig"
+        return $true
+    }
+    $cavemanEnv = [ordered]@{
+        # Prefer existing NINEROUTER_KEY from the environment; else fall back to secret file.
+        NINEROUTER_KEY         = (Get-CavemanNinerouterKey)
+        CAVE_SSRF_ALLOWLIST    = '127.0.0.1:20128'
+        CAVEMAN_CONFIG         = $caveConfig
+    }
+
     Write-Host 'CAVEMAN_STATUS=STARTING'
-    $launcherDir = Split-Path -Parent $CavemanLauncher
-    $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $CavemanLauncher) -WorkingDirectory $launcherDir -WindowStyle 'Normal' -PassThru
+
+    # --- Set process-scope env so the launched child inherits it ---
+    # PowerShell 7+ Start-Process supports -Environment; on 5.1 we set process-level
+    # env vars before launching (safe to restore afterwards: the child already
+    # captured them at spawn time).
+    $setKind = 'StartProcess'
+    if ($PSVersionTable.PSVersion.Major -lt 7) {
+        $setKind = 'SetEnvironment'
+        foreach ($k in $cavemanEnv.Keys) {
+            $v = [string]$cavemanEnv[$k]
+            if ([string]::IsNullOrWhiteSpace($v)) { continue }
+            [Environment]::SetEnvironmentVariable($k, $v, 'Process')
+        }
+    }
+
+    $launcherDir = $Root
+    if ($bin.Kind -eq 'ExternalScript') {
+        # Launch a .ps1 shim by explicitly invoking powershell/pwsh -File.
+        $psHost = if ($PSVersionTable.PSVersion.Major -ge 6) { 'pwsh' } else { 'powershell' }
+        $startArgs = @{
+            FilePath        = $psHost
+            ArgumentList    = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $bin.Exe, 'start')
+            WorkingDirectory = $launcherDir
+            WindowStyle     = 'Normal'
+            PassThru        = $true
+        }
+        if ($setKind -eq 'StartProcess') {
+            $startArgs.Environment = $cavemanEnv
+        }
+    } else {
+        $startArgs = @{
+            FilePath        = $bin.Exe
+            ArgumentList    = @('start')
+            WorkingDirectory = $launcherDir
+            WindowStyle     = 'Normal'
+            PassThru        = $true
+        }
+        if ($setKind -eq 'StartProcess') {
+            $startArgs.Environment = $cavemanEnv
+        }
+    }
+
+    $p = $null
+    try {
+        $p = Start-Process @startArgs -ErrorAction Stop
+    } catch {
+        if ($setKind -eq 'SetEnvironment') {
+            foreach ($k in $cavemanEnv.Keys) {
+                [Environment]::SetEnvironmentVariable($k, $null, 'Process')
+            }
+        }
+        Write-Host "CAVEMAN=BYPASS reason=start_failed error=$($_.Exception.Message)"
+        return $true
+    }
+
+    # Restore process-scope env on 5.1 (optional; the child already inherited values).
+    if ($setKind -eq 'SetEnvironment') {
+        foreach ($k in $cavemanEnv.Keys) {
+            [Environment]::SetEnvironmentVariable($k, $null, 'Process')
+        }
+    }
 
     # FAIL-OPEN probe: wait up to 15s (30 x 500ms) for a loopback listener on 8787.
     for ($i = 0; $i -lt 30; $i++) {
@@ -375,7 +491,7 @@ function Start-CavemanManaged {
             Write-Host 'CAVEMAN=ACTIVE endpoint=127.0.0.1:8787'
             return $true
         }
-        if ($p.HasExited) { break }
+        if ($null -ne $p -and $p.HasExited) { break }
     }
 
     Write-Host 'CAVEMAN=BYPASS reason=not_listening_after_start fail_open=true'
