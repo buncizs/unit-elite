@@ -156,7 +156,13 @@ async function resolveRoute(options = {}) {
   }
 
   // Proxy is reachable → route inference through it.
-  const endpoint = 'http://' + host + ':' + port + '/v1';
+  // NOTE: path must be `/compat/9router/v1`, NOT the bare `/v1`. The 9router
+  // upstream is mounted under Caveman's `compat: 9router:` block (see
+  // caveman.yaml), which injects `Authorization: Bearer <NINEROUTER_KEY>` on
+  // forward. A bare `/v1` route (OpenAI bare endpoint) is not part of any
+  // configured compat mount and is forwarded to the proxy's default upstream
+  // WITHOUT the credential → HTTP 401. (TECH fix.)
+  const endpoint = 'http://' + host + ':' + port + '/compat/9router/v1';
   return {
     endpoint,
     mode: 'caveman',

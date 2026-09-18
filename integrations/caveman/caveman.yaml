@@ -1,7 +1,7 @@
 # ============================================================================
 # caveman.yaml - Caveman proxy config for Unit Elite (mode B2)
 # ============================================================================
-# Jalur: Runtime Gateway (:20129) -> [CAVEMAN PROXY B2] -> 9Router (:20128/v1)
+# Jalur: Runtime Gateway (:20129) -> [CAVEMAN PROXY B2] -> 9Router (:20128)
 #
 # Proxy Caveman berjalan sebagai listener OPTIONAL di 127.0.0.1:8787 dan
 # meneruskan (proxy/forward) request ke upstream 9Router loopback :20128.
@@ -16,10 +16,23 @@
 # SSRF allowlist: karena upstream kita adalah 9Router lokal (loopback/private
 # 127.0.0.1:20128), proxy WAJIB diberi env `CAVE_SSRF_ALLOWLIST=127.0.0.1:20128`
 # agar kirimannya diteruskan (loopback diblokir allowlist default). Tanpa itu,
-# proxy menolak forward ke 9Router.
+# proxy menolak forward ke 9Router. (Diset di start-caveman.cmd.)
 #
 # Format ini adalah skema native Go proxy Caveman (bukan skema wrapper CLI).
 # `mode: compress` = aktifkan Engine transforms yang eligible.
+#
+# AUTH FIX (TECH bug: HTTP 401 saat forward ke 9Router):
+# Caveman menjadikan proxy sebagai base-URL swap: ia hanya meneruskan request
+# ke upstream yang TERKONFIGURASI. Dengan providers:{} dan compat:{} kosong,
+# request OpenAI bare /v1/chat/completions diteruskan ke upstream DEFAULT proxy
+# (bukan 9Router) -> 401. Fix: daftarkan 9Router sebagai `compat` mount (skema
+# documented: `base_url` + `api_key_env`). Mount ini:
+#   - mengarahkan forward ke 9Router loopback :20128/v1, dan
+#   - menyuntikkan `Authorization: Bearer <NINEROUTER_KEY>` dari env
+#     `NINEROUTER_KEY` saat meneruskan ke 9Router (api_key_env fallback), dan
+#     menurut dokumentasi API-keys-proxy, Bearer inbound juga diperthankan.
+# Skema diverifikasi dari docs/technical/configuration.md + proxy-and-providers.md
+# (repo JuliusBrussee/caveman): pola `compat: <name>: { base_url, api_key_env }`.
 # ============================================================================
 
 label: unit-elite
@@ -30,4 +43,13 @@ subscription_compress: false
 toolschema_strip: false
 breakpoint_plan: frontier
 providers: {}
-compat: {}
+compat:
+  # Mount OpenAI-compatible menuju 9Router lokal (upstream B2).
+  # `base_url` = endpoint upstream (loopback :20128, TANPA suffix /v1 — path /compat/9router/v1/... diteruskan memakai suffix-nya sendiri).
+  # `api_key_env` = nama env yang memegang credential upstream (NINEROUTER_KEY)
+  #   -> Caveman menyuntikkan `Authorization: Bearer <NINEROUTER_KEY>` saat
+  #   forward ke 9Router, sehingga auth tidak lagi HTTP 401.
+  # Butuh CAVE_SSRF_ALLOWLIST=127.0.0.1:20128 agar loopback diizinkan (lihat atas).
+  9router:
+    base_url: http://127.0.0.1:20128
+    api_key_env: NINEROUTER_KEY

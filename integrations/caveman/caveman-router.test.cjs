@@ -84,7 +84,13 @@ async function main() {
     try {
       const r = await resolveRoute({ configPath: cfgPath, directEndpoint: DIRECT });
       assert.strictEqual(r.mode, 'caveman', 'mode should be caveman when listener up');
-      assert.strictEqual(r.endpoint, `http://127.0.0.1:${port}/v1`, 'endpoint should point at Caveman listener');
+      // Endpoint must target Caveman's `compat` 9router mount (not bare /v1) so
+      // NINEROUTER_KEY is injected on forward (regression for HTTP 401).
+      assert.strictEqual(
+        r.endpoint,
+        `http://127.0.0.1:${port}/compat/9router/v1`,
+        'endpoint should point at Caveman compat 9router mount'
+      );
     } finally {
       listener.close();
     }
